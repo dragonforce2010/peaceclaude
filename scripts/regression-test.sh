@@ -270,6 +270,33 @@ else
   fail "account_update_delete" "update=$UPD_CODE delete=$DEL_CODE"
 fi
 
+# Regression: Desktop-only Free account detection, per-account security score, and deleting active account syncs status active_profile
+curl -fsS -o /dev/null -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H "Content-Type: application/json" \
+  -d '{"name":"qa-free","display_name":"QA 免费号回归","use_now":true}' \
+  "http://127.0.0.1:${CTRL_PORT}/api/profiles/create"
+echo '{"lastKnownAccountUuid":"11111111-2222-3333-4444-555555555555"}' > "$TMP_HOME/profiles/qa-free/desktop-data/config.json"
+chmod 600 "$TMP_HOME/profiles/qa-free/desktop-data/config.json"
+FREE_ACCTS_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/accounts")"
+DEL_ACTIVE_JSON="$(curl -fsS -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H "Content-Type: application/json" -d '{"name":"qa-free"}' "http://127.0.0.1:${CTRL_PORT}/api/accounts/delete")"
+POST_DEL_STATUS="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/status")"
+if python3 - "$FREE_ACCTS_JSON" "$DEL_ACTIVE_JSON" "$POST_DEL_STATUS" <<'PY'
+import json, sys
+accts = {a["name"]: a for a in json.loads(sys.argv[1]).get("accounts", [])}
+del_res = json.loads(sys.argv[2])
+st = json.loads(sys.argv[3])
+qa = accts.get("qa-free", {})
+assert qa.get("account", {}).get("plan_label") == "Free", qa
+assert qa.get("usage", {}).get("status") == "free_no_quota", qa
+assert isinstance(qa.get("security", {}).get("score"), int), qa
+assert del_res.get("active") == "default", del_res
+assert st.get("active_profile") == "default", st
+PY
+then
+  ok "free_tier_security_and_delete_active" "Free account auto-detection, security score field, and active_profile fallback on delete verified"
+else
+  fail "free_tier_security_and_delete_active" "unexpected JSON for Free tier / security score / delete active"
+fi
+
 # 11. pf anchor generation + pfctl -n syntax check
 VM_JSON="$("$BIN" vm-proxy status --json)"
 if [[ "$VM_JSON" == *'"syntax_valid": true'* ]]; then

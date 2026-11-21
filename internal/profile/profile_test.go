@@ -316,3 +316,83 @@ func TestUpdateMetaAvatarAndDisplayNamePreserveFields(t *testing.T) {
 		t.Fatal("expected unsupported avatar_id to return validation error")
 	}
 }
+
+func TestDesktopFreeAccountInferenceAndUsageStatus(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Desktop-activated Free account (no CLI creds, empty u:{} usage history)
+	pFree, err := Ensure(cfg, "desktop-free", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgJSON := `{"windowSizeWasSignedIn":true,"lastKnownAccountUuid":"acct-free-111","sshTransportFlagLastAnswer":{"accountUuid":"acct-free-111","orgUuid":"org-free-222"}}`
+	if err := os.WriteFile(filepath.Join(pFree.DesktopDir, "config.json"), []byte(cfgJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pFree.DesktopDir, "plan-usage-history.json"), []byte(`{"version":2,"samples":[{"t":1795271043863,"org":"org-free-222","u":{}}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loadedFree, err := Load(cfg, "desktop-free")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loadedFree.HasDesktopAuth {
+		t.Fatal("expected HasDesktopAuth=true")
+	}
+	if loadedFree.Account.AccountUUID != "acct-free-111" || loadedFree.Account.OrgUUID != "org-free-222" {
+		t.Fatalf("expected desktop metadata UUIDs, got %+v", loadedFree.Account)
+	}
+	if loadedFree.Account.PlanLabel != "Free" {
+		t.Fatalf("expected inferred PlanLabel=Free for activated Desktop without paid quota, got %q", loadedFree.Account.PlanLabel)
+	}
+	snapFree := FetchUsage(context.Background(), cfg, loadedFree, true, nil)
+	if snapFree.Status != "free_no_quota" || snapFree.Source != "free_tier" {
+		t.Fatalf("expected free_no_quota status for Free account, got %+v", snapFree)
+	}
+
+	// 2. ManualLocked override takes precedence over Free inference
+	manualMax := "Max 5x"
+	locked := true
+	updatedMax, err := UpdateMeta(cfg, "desktop-free", MetaPatch{ManualPlan: &manualMax, ManualLocked: &locked})
+	if err != nil || updatedMax.Account.PlanLabel != "Max 5x" {
+		t.Fatalf("expected ManualLocked Max 5x to remain, got %+v err=%v", updatedMax, err)
+	}
+
+	// 3. Desktop-activated account WITH quota history infers Pro
+	pPaid, err := Ensure(cfg, "desktop-paid", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pPaid.DesktopDir, "config.json"), []byte(cfgJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pPaid.DesktopDir, "plan-usage-history.json"), []byte(`{"version":2,"samples":[{"t":1795271043863,"org":"org-paid-333","u":{"fh":22,"sd":35}}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loadedPaid, err := Load(cfg, "desktop-paid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedPaid.Account.PlanLabel != "Pro" {
+		t.Fatalf("expected paid quota history sample to infer Pro, got %q", loadedPaid.Account.PlanLabel)
+	}
+
+	// 4. Unactivated empty profile keeps "未识别"
+	if _, err := Ensure(cfg, "blank-acct", ""); err != nil {
+		t.Fatal(err)
+	}
+	loadedBlank, err := Load(cfg, "blank-acct")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedBlank.Account.PlanLabel != "未识别" {
+		t.Fatalf("expected unactivated profile to stay 未识别, got %q", loadedBlank.Account.PlanLabel)
+	}
+}

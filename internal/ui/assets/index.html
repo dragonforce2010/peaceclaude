@@ -76,6 +76,10 @@
             <span class="nav-ico" data-icon="database"></span>
             <span class="nav-label">存储与边界</span>
           </button>
+          <button class="nav-item" data-tab="cli" type="button">
+            <span class="nav-ico" data-icon="terminal"></span>
+            <span class="nav-label">CLI 使用指南</span>
+          </button>
         </nav>
       </div>
 
@@ -879,6 +883,68 @@
           </div>
         </div>
       </section>
+      <!-- TAB 9: CLI Usage Guide -->
+      <section class="tab-panel" id="tab-cli">
+        <div class="page-head">
+          <div>
+            <h1>CLI 使用指南</h1>
+            <p class="muted">全入口终端命令与参数说明（短别名 <code>pclaude</code> 与 <code>peaceclaude</code> 完全等效），点击右侧即可一键复制</p>
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-secondary btn-sm" id="btn-cli-copy-active" type="button">复制当前账号 CLI 命令</button>
+          </div>
+        </div>
+
+        <div class="cli-warn-banner">
+          <span class="nav-ico" data-icon="alert-triangle" style="color:var(--amber); margin-top:2px;"></span>
+          <div>
+            <strong>登录安全提醒：使用 CLI 唤起 Arc 等系统浏览器时的网络条件</strong>
+            <p>运行 <code>peaceclaude cli</code> 时，CLI 进程内的接口请求 100% 强制经本地代理 (<code>127.0.0.1:18897</code>) 走静态美国出口；但首次登录由终端自动唤起 <strong>Arc / 系统默认浏览器</strong>时，GUI 浏览器进程不会继承终端环境变量，而是读取 macOS 系统 PAC。<strong>因此必须保持「系统浏览器 PAC」开启（当前守护进程启动已默认自动开启）</strong>；若您手动关闭了 PAC，请勿直接使用系统浏览器完成登录，应点击控制台<strong>「隔离浏览器登录」</strong>或运行 <code>peaceclaude login-browser --profile &lt;ID&gt;</code>。</p>
+          </div>
+        </div>
+
+        <div class="cli-guide-grid" id="cli-guide-grid">
+          <div class="card cli-cmd-card">
+            <div class="cli-cmd-head">
+              <div><h3>1. 日常启动隔离 CLI / Desktop</h3><p class="muted">自动校验静态 IP、注入时区语言并剥离污染环境变量</p></div>
+            </div>
+            <div class="cli-cmd-line"><code>peaceclaude cli</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude cli" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude cli --profile &lt;ID&gt;</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude cli --profile " type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude app --profile &lt;ID&gt;</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude app --profile " type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude login-browser --profile &lt;ID&gt;</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude login-browser --profile " type="button">复制</button></div>
+          </div>
+
+          <div class="card cli-cmd-card">
+            <div class="cli-cmd-head">
+              <div><h3>2. 多账号与共享规则管理</h3><p class="muted">创建、切换当前使用档案，或同步/备份指纹与全局 CLAUDE.md</p></div>
+            </div>
+            <div class="cli-cmd-line"><code>peaceclaude profile list</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude profile list" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude profile create &lt;ID&gt;</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude profile create " type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude profile use &lt;ID&gt;</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude profile use " type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude clean --profile &lt;ID&gt; --dry-run</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude clean --profile default --dry-run" type="button">复制</button></div>
+          </div>
+
+          <div class="card cli-cmd-card">
+            <div class="cli-cmd-head">
+              <div><h3>3. 安全门禁与 PAC 接管</h3><p class="muted">控制守护进程、浏览器 PAC 分流、紧急熔断与内核 pf 防护</p></div>
+            </div>
+            <div class="cli-cmd-line"><code>peaceclaude service restart</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude service restart" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude browser-pac status</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude browser-pac status" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude lock "manual check"</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude lock" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude vm-proxy install</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude vm-proxy install" type="button">复制</button></div>
+          </div>
+
+          <div class="card cli-cmd-card">
+            <div class="cli-cmd-head">
+              <div><h3>4. 状态检查、11 项体检与三分诊</h3><p class="muted">核验静态 IP、OAuth 连通性、直连 Socket 泄漏与抓包日志</p></div>
+            </div>
+            <div class="cli-cmd-line"><code>peaceclaude status --check</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude status --check" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude doctor --fix</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude doctor --fix" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude diagnose</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude diagnose" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude logs -n 80</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude logs -n 80" type="button">复制</button></div>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -901,10 +967,11 @@
           <div class="avatar-circle lg" id="det-avatar">D</div>
           <div>
             <div class="account-title-line">
-              <h2 id="det-display-name" style="margin:0;">default</h2>
+              <h2 class="name-ellipsis" id="det-display-name" style="margin:0;">default</h2>
               <span class="plan-badge" id="det-plan-badge">未识别</span>
               <span class="state-tag pass hidden" id="det-activated-tag">已激活</span>
-              <span class="state-tag hidden" id="det-active-tag">默认</span>
+              <span class="state-tag active-use-badge hidden" id="det-active-tag">当前使用</span>
+              <button type="button" class="sec-score-badge hidden" id="det-sec-badge"></button>
               <span class="state-tag pass hidden" id="det-running-tag">Desktop 运行中</span>
             </div>
             <p class="muted" id="det-subtitle">档案 ID：default</p>
@@ -921,7 +988,7 @@
         <button class="btn btn-ghost btn-sm hidden" id="det-btn-stop-desktop" type="button">停止此账号 Desktop</button>
         <button class="btn btn-secondary btn-sm" id="det-btn-browser" type="button">打开隔离浏览器登录</button>
         <button class="btn btn-secondary btn-sm" id="det-btn-copy-cli" type="button">复制 CLI 命令</button>
-        <button class="btn btn-ghost btn-sm hidden" id="det-btn-use" type="button">设为当前默认账号</button>
+        <button class="btn btn-ghost btn-sm hidden" id="det-btn-use" type="button">设为当前使用</button>
       </div>
 
       <div class="modal-body-grid">
@@ -1049,7 +1116,7 @@
         </div>
         <label class="switch-label" style="color:var(--text);">
           <input type="checkbox" id="create-use-now" checked />
-          <span>创建后设为当前默认账号</span>
+          <span>创建后设为当前使用</span>
         </label>
         <div class="btn-row" style="justify-content:flex-end;">
           <button type="button" class="btn btn-ghost btn-sm" id="create-btn-cancel">取消</button>

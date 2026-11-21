@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"peaceclaude/internal/config"
+	"peaceclaude/internal/egress"
 	"peaceclaude/internal/host"
 	"peaceclaude/internal/launcher"
 	"peaceclaude/internal/profile"
@@ -351,11 +352,81 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+type AccountSecurity struct {
+	Score   int      `json:"score"`
+	Grade   string   `json:"grade"` // safe | caution | unsafe
+	Label   string   `json:"label"` // 安全 | 需注意 | 存在风险
+	Summary string   `json:"summary"`
+	Issues  []string `json:"issues,omitempty"`
+}
+
 type accountView struct {
 	profile.Profile
 	Usage             profile.UsageSnapshot `json:"usage"`
 	RunningDesktopPID string                `json:"running_desktop_pid,omitempty"`
 	CLICommand        string                `json:"cli_command"`
+	Security          AccountSecurity       `json:"security"`
+}
+
+func computeAccountSecurity(cfg *config.Config, prof profile.Profile, runningPID string, gate egress.GateSnapshot, rep host.DesktopInspectReport, pac host.BrowserPACStatus, vm host.VMProxyStatus, directLeaks int) AccountSecurity {
+	score := 100
+	var issues []string
+	deduct := func(pts int, msg string) {
+		score -= pts
+		issues = append(issues, msg)
+	}
+	if !gate.Open {
+		deduct(30, "静态出口门禁未放行")
+	}
+	if !cfg.Egress.FailClosed {
+		deduct(20, "未开启 Fail-Closed 熔断")
+	}
+	if strings.TrimSpace(prof.Fingerprint.DeviceUUID) == "" {
+		deduct(15, "缺少独立隔离设备指纹")
+	}
+	if runningPID == "" && rep.ExposedCount > 0 {
+		deduct(15, fmt.Sprintf("检测到 %d 个未隔离原生 Desktop 进程", rep.ExposedCount))
+	}
+	if directLeaks > 0 {
+		deduct(15, fmt.Sprintf("检测到 %d 个宿主机直连 Anthropic Socket", directLeaks))
+	}
+	if !pac.MatchesPeace {
+		deduct(8, "系统浏览器 PAC 未开启")
+	}
+	if !vm.PeacePFAnchorExists && !vm.LegacyPFAnchorExists {
+		deduct(12, "未安装内核 pf 防直连护盾")
+	} else if !vm.PeacePFAnchorExists && vm.LegacyPFAnchorExists {
+		deduct(8, "仅存在旧版 pf，建议授权安装 PeaceClaude pf 规则")
+	}
+	if !cfg.Shield.TelemetryShield {
+		deduct(5, "未开启遥测屏蔽盾")
+	}
+	if !cfg.Identity.StripHostAnthropicEnv {
+		deduct(5, "未剥离宿主机 Anthropic 环境变量")
+	}
+	if score < 0 {
+		score = 0
+	}
+	grade := "safe"
+	label := "安全"
+	if score < 70 {
+		grade = "unsafe"
+		label = "存在风险"
+	} else if score < 90 {
+		grade = "caution"
+		label = "需注意"
+	}
+	summary := "隔离、静态出口与防护策略全部就绪"
+	if len(issues) > 0 {
+		summary = strings.Join(issues, "；")
+	}
+	return AccountSecurity{
+		Score:   score,
+		Grade:   grade,
+		Label:   label,
+		Summary: summary,
+		Issues:  issues,
+	}
 }
 
 func findRunningPIDsForProfile(rep host.DesktopInspectReport, prof profile.Profile) []string {
@@ -400,7 +471,7 @@ func pickRecommendedProfile(items []accountView) (name string, reason string) {
 		it := items[bestIdx]
 		return it.Name, "当前剩余额度最充裕，建议优先使用"
 	}
-	return items[0].Name, "当前默认隔离档案"
+	return items[0].Name, "当前使用隔离档案"
 }
 
 func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
@@ -417,6 +488,10 @@ func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
 	withUsage := r.URL.Query().Get("with_usage") != "0"
 
 	rep := host.InspectRunningDesktop(&cfg)
+	gateSnap := s.gate.Snapshot()
+	pacSt := host.InspectBrowserPAC(&cfg)
+	vmSt := host.InspectVMProxy(&cfg)
+	directLeaks := len(s.currentDirectHits())
 	views := make([]accountView, len(list))
 
 	var wg sync.WaitGroup
@@ -435,6 +510,7 @@ func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
 			RunningDesktopPID: runningPID,
 			CLICommand:        cliCmd,
 			Usage:             profile.UsageSnapshot{Profile: p.Name, Status: "no_token", Source: "none"},
+			Security:          computeAccountSecurity(&cfg, p, runningPID, gateSnap, rep, pacSt, vmSt, directLeaks),
 		}
 		if withUsage {
 			wg.Add(1)
@@ -486,11 +562,13 @@ func (s *Server) handleAccountDetail(w http.ResponseWriter, r *http.Request) {
 	if p.Name == cfg.ActiveProfile {
 		cliCmd = "peaceclaude cli"
 	}
+	sec := computeAccountSecurity(&cfg, *p, runningPID, s.gate.Snapshot(), rep, host.InspectBrowserPAC(&cfg), host.InspectVMProxy(&cfg), len(s.currentDirectHits()))
 	writeJSON(w, http.StatusOK, accountView{
 		Profile:           *p,
 		Usage:             usage,
 		RunningDesktopPID: runningPID,
 		CLICommand:        cliCmd,
+		Security:          sec,
 	})
 }
 
@@ -553,15 +631,23 @@ func (s *Server) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
 			launcher.TerminatePIDs(pids, 3*time.Second)
 		}
 	}
+	wasActive := (cfg.ActiveProfile == name)
 	err := profile.Delete(&cfg, name)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if wasActive {
+		s.mu.Lock()
+		next := *s.cfg
+		next.ActiveProfile = cfg.ActiveProfile
+		s.swapConfigLocked(next)
+		s.mu.Unlock()
+	}
 	s.usageMu.Lock()
 	delete(s.usageCache, name)
 	s.usageMu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": name})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": name, "active": cfg.ActiveProfile})
 }
 
 func (s *Server) handleAccountStopDesktop(w http.ResponseWriter, r *http.Request) {
@@ -817,20 +903,22 @@ func (s *Server) handleDoctorFix(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.FixAll {
-		// Automatically apply non-disruptive fixes, and also enable PAC + takeover if needed.
 		curRep := host.RunDoctor(ctx, &cfg, true, s.gate.Snapshot())
+		needPF := ""
 		for _, ck := range curRep.Checks {
 			if ck.Status == "pass" || !ck.Fixable {
 				continue
 			}
 			if ck.FixAction == "install_pf" || ck.FixAction == "install_pf_and_pac" {
-				// Enable PAC if needed; leave privileged pf prompt to explicit click unless requested via check_id.
-				if ck.FixAction == "install_pf_and_pac" {
-					applyAction("enable_pac")
+				if needPF == "" || ck.FixAction == "install_pf_and_pac" {
+					needPF = ck.FixAction
 				}
 				continue
 			}
 			applyAction(ck.FixAction)
+		}
+		if needPF != "" {
+			applyAction(needPF)
 		}
 	} else {
 		act := strings.TrimSpace(body.Action)

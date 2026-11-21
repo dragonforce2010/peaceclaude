@@ -163,4 +163,7 @@ func TestLaunchLoginBrowserCleanFlagsWithoutUnsupportedBanner(t *testing.T) {
 	if !strings.Contains(string(rawPrefs), `"dns_prefetching":{"enabled":false}`) {
 		t.Fatalf("unexpected Preferences content: %s", string(rawPrefs))
 	}
+	if !strings.Contains(string(rawPrefs), `"geolocation":2`) {
+		t.Fatalf("expected geolocation blocked in Preferences, got: %s", string(rawPrefs))
+	}
 }

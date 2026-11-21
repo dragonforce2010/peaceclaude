@@ -188,6 +188,19 @@ func ensureBrowserDNSPrivacyPrefs(browserDir string) error {
 	}
 	prefs["dns_prefetching"] = map[string]any{"enabled": false}
 	prefs["async_dns"] = map[string]any{"enabled": false}
+	// Block HTML5 Geolocation API unconditionally inside the isolated browser profile so
+	// sites cannot query macOS CoreLocation / Wi-Fi positioning behind the static US exit.
+	profileMap, _ := prefs["profile"].(map[string]any)
+	if profileMap == nil {
+		profileMap = map[string]any{}
+	}
+	contentSettings, _ := profileMap["default_content_setting_values"].(map[string]any)
+	if contentSettings == nil {
+		contentSettings = map[string]any{}
+	}
+	contentSettings["geolocation"] = 2
+	profileMap["default_content_setting_values"] = contentSettings
+	prefs["profile"] = profileMap
 	out, err := json.Marshal(prefs)
 	if err != nil {
 		return err

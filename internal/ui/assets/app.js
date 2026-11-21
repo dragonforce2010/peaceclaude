@@ -28,6 +28,7 @@
     'alert-triangle': '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
     'x-circle': '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
     'qr-code': '<rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/>',
+    terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
   };
 
   function hydrateIcons(root = document) {
@@ -411,7 +412,7 @@
       tab = 'network';
       switchNetSub('proxy');
     }
-    const valid = ['accounts', 'security', 'leaks', 'capture', 'remote', 'appearance', 'network', 'storage'];
+    const valid = ['accounts', 'security', 'leaks', 'capture', 'remote', 'appearance', 'network', 'storage', 'cli'];
     if (!valid.includes(tab)) tab = 'accounts';
     currentTab = tab;
 
@@ -623,6 +624,49 @@
     const acct = a.account || {};
     return !!(a.has_cli_creds || a.has_desktop_auth || acct.source === 'claude_json');
   }
+  function planTierClass(plan) {
+    const p = String(plan || '').toLowerCase();
+    if (!p || p === '未识别') return 'tier-unknown';
+    if (p.includes('free')) return 'tier-free';
+    if (p.includes('ultra')) return 'tier-ultra';
+    if (p.includes('max')) return 'tier-max';
+    if (p.includes('pro')) return 'tier-pro';
+    if (p.includes('team') || p.includes('enterprise')) return 'tier-team';
+    return 'tier-unknown';
+  }
+  function isFreeAccount(a) {
+    const usage = a.usage || {};
+    const acct = a.account || {};
+    if (usage.five_hour || usage.weekly) return false;
+    if (usage.status === 'free_no_quota' || usage.source === 'free_tier') return true;
+    return String(acct.plan_label || '').toLowerCase() === 'free';
+  }
+  function secBadgeHTML(a) {
+    const sec = a.security;
+    if (!sec || typeof sec.score !== 'number') return '';
+    const cls = sec.grade === 'safe' ? 'safe' : (sec.grade === 'caution' ? 'caution' : 'unsafe');
+    const title = sec.summary || `${sec.label || ''} · 点击查看安全检测`;
+    return `<button type="button" class="sec-score-badge ${cls}" data-acc-security="${esc(a.name)}" title="${esc(title)}">安全 ${esc(sec.score)}分</button>`;
+  }
+  function freeUsageNoticeHTML(a) {
+    const usage = a.usage || {};
+    const reason = usage.hint || usage.note || '免费账号（Free）无固定 5h / Weekly 付费配额窗口，按会话波动限流';
+    return `
+      <div class="free-usage-notice">
+        <div class="free-usage-notice-title">
+          <span>免费账号（Free）无 5h / Weekly 付费配额</span>
+          <span class="plan-badge tier-free">Free</span>
+        </div>
+        <div class="free-usage-notice-desc">${esc(reason)}</div>
+      </div>`;
+  }
+  function freeUsageRosterHTML() {
+    return `
+      <div class="roster-free-usage">
+        <strong>免费账号 (Free)</strong>
+        <span>无 5h / Weekly 付费配额</span>
+      </div>`;
+  }
 
   function renderAccounts(data) {
     accountsData = data;
@@ -645,16 +689,24 @@
     const hero = items.find((a) => a.active) || items[0];
     const others = items.filter((a) => a.name !== hero.name);
 
-    // Render Hero Default Account Card
+    // Render Hero Active Account Card
     {
       const acct = hero.account || {};
       const usage = hero.usage || {};
       const plan = acct.plan_label || '未识别';
+      const displayName = hero.display_name || hero.name;
       const activated = isAccountActivated(hero);
+      const isFree = isFreeAccount(hero);
       const otherRunning = !hero.running_desktop_pid && runningItems.length > 0 && singleActive;
       const idShort = acct.account_uuid ? acct.account_uuid.slice(0, 8) : (acct.org_uuid ? 'org:' + acct.org_uuid.slice(0, 8) : '待绑定');
       const regText = acct.account_age_text ? `${acct.account_age_text} (${fmtDate(acct.account_created_at)})` : '注册时间未记录';
-      const usageSrc = usage.source === 'oauth_api' ? 'OAuth 实时' : usage.source === 'desktop_history' ? '本地样本' : '待同步';
+      const usageSrc = usage.source === 'oauth_api'
+        ? 'OAuth 实时'
+        : usage.source === 'desktop_history'
+        ? '本地样本'
+        : usage.source === 'free_tier'
+        ? 'Free 档案'
+        : '待同步';
       const subText = acct.email ? `${acct.email} · @${hero.name}` : `@${hero.name}${hero.note ? ' · ' + hero.note : ''}`;
       let deskLabel = '启动 Desktop 登录';
       if (hero.running_desktop_pid) deskLabel = '切到前台';
@@ -663,15 +715,16 @@
       else if (activated) deskLabel = '启动 Desktop';
 
       $('account-hero-slot').innerHTML = `
-        <article class="card hero-account-card" data-acc-card="${esc(hero.name)}">
+        <article class="card hero-account-card ${hero.active ? 'is-current-account' : ''}" data-acc-card="${esc(hero.name)}">
           <div class="hero-account-left">
             <div class="account-title-wrap">
               <div class="avatar-circle lg" title="点击「详情与编辑」可切换 9 款 3D 动物头像">${avatarMediaHTML(hero)}</div>
-              <div>
+              <div style="min-width:0; flex:1;">
                 <div class="account-title-line">
-                  <h3 class="account-name">${esc(hero.display_name || hero.name)}</h3>
-                  <span class="plan-badge">${esc(plan)}</span>
-                  <span class="mono-tag">当前默认</span>
+                  <h3 class="account-name name-ellipsis" title="${esc(displayName)}">${esc(displayName)}</h3>
+                  <span class="plan-badge ${planTierClass(plan)}">${esc(plan)}</span>
+                  ${hero.active ? '<span class="active-use-badge">当前使用</span>' : '<span class="mono-tag">待选</span>'}
+                  ${secBadgeHTML(hero)}
                   <span class="state-dot-label ${activated ? 'ok' : ''}">
                     <span class="status-dot ${activated ? 'ok' : ''}"></span>
                     ${activated ? '已激活' : '未登录'}
@@ -691,8 +744,7 @@
 
           <div class="hero-account-right">
             <div class="usage-bars-stack">
-              ${usageBarHTML(usage.five_hour, '5-Hour Limit')}
-              ${usageBarHTML(usage.weekly, 'Weekly · All Models')}
+              ${isFree ? freeUsageNoticeHTML(hero) : `${usageBarHTML(usage.five_hour, '5-Hour Limit')}${usageBarHTML(usage.weekly, 'Weekly · All Models')}`}
             </div>
             <div class="btn-row">
               <button class="btn ${hero.running_desktop_pid || !otherRunning ? 'btn-primary' : 'btn-accent'} btn-sm" data-acc-desktop="${esc(hero.name)}" type="button">${esc(deskLabel)}</button>
@@ -700,6 +752,7 @@
               <button class="btn btn-secondary btn-sm" data-acc-browser="${esc(hero.name)}" type="button">隔离浏览器登录</button>
               <button class="btn btn-secondary btn-sm" data-acc-detail="${esc(hero.name)}" type="button">详情与编辑</button>
               <button class="btn btn-ghost btn-sm" data-acc-cli="${esc(hero.name)}" type="button">复制 CLI</button>
+              ${hero.name !== 'default' ? `<button class="btn btn-danger-ghost btn-sm" data-acc-delete="${esc(hero.name)}" type="button">删除</button>` : ''}
             </div>
           </div>
         </article>`;
@@ -716,7 +769,9 @@
         const acct = a.account || {};
         const usage = a.usage || {};
         const plan = acct.plan_label || '未识别';
+        const displayName = a.display_name || a.name;
         const activated = isAccountActivated(a);
+        const isFree = isFreeAccount(a);
         const fh = usage.five_hour ? Math.round(usage.five_hour.utilization || 0) : null;
         const wk = usage.weekly ? Math.round(usage.weekly.utilization || 0) : null;
         const otherRunning = !a.running_desktop_pid && runningItems.length > 0 && singleActive;
@@ -727,8 +782,10 @@
               <div class="avatar-circle">${avatarMediaHTML(a)}</div>
               <div>
                 <div class="roster-name-line">
-                  <strong>${esc(a.display_name || a.name)}</strong>
-                  <span class="plan-badge">${esc(plan)}</span>
+                  <strong class="name-ellipsis" title="${esc(displayName)}">${esc(displayName)}</strong>
+                  <span class="plan-badge ${planTierClass(plan)}">${esc(plan)}</span>
+                  ${a.active ? '<span class="active-use-badge">当前使用</span>' : ''}
+                  ${secBadgeHTML(a)}
                 </div>
                 <div class="roster-sub">${esc(acct.email ? `${acct.email} · @${a.name}` : `@${a.name}${a.note ? ' · ' + a.note : ''}`)}</div>
               </div>
@@ -743,6 +800,7 @@
             </div>
 
             <div class="roster-col-usage">
+              ${isFree ? freeUsageRosterHTML() : `
               <div class="mini-bar-row">
                 <span>5h</span>
                 <div class="progress-track"><div class="progress-fill ${fh != null && fh >= 85 ? 'danger' : fh != null && fh >= 65 ? 'warn' : ''}" style="width:${fh ?? 0}%"></div></div>
@@ -752,7 +810,7 @@
                 <span>7d</span>
                 <div class="progress-track"><div class="progress-fill ${wk != null && wk >= 85 ? 'danger' : wk != null && wk >= 65 ? 'warn' : ''}" style="width:${wk ?? 0}%"></div></div>
                 <span>${wk == null ? '—' : wk + '%'}</span>
-              </div>
+              </div>`}
             </div>
 
             <div class="btn-row">
@@ -760,7 +818,8 @@
               ${a.running_desktop_pid ? `<button class="btn btn-ghost btn-sm" data-acc-stop="${esc(a.name)}" type="button">停止</button>` : ''}
               <button class="btn btn-secondary btn-sm" data-acc-browser="${esc(a.name)}" type="button">浏览器</button>
               <button class="btn btn-secondary btn-sm" data-acc-detail="${esc(a.name)}" type="button">详情</button>
-              <button class="btn btn-ghost btn-sm" data-acc-use="${esc(a.name)}" type="button">设为默认</button>
+              <button class="btn btn-ghost btn-sm" data-acc-use="${esc(a.name)}" type="button">设为使用</button>
+              ${a.name !== 'default' ? `<button class="btn btn-danger-ghost btn-sm" data-acc-delete="${esc(a.name)}" type="button">删除</button>` : ''}
             </div>
           </div>`;
       }).join('');
@@ -772,12 +831,28 @@
     const acct = a.account || {};
     const usage = a.usage || {};
     const activated = isAccountActivated(a);
+    const isFree = isFreeAccount(a);
+    const displayName = a.display_name || a.name;
 
     $('det-avatar').innerHTML = avatarMediaHTML(a);
-    $('det-display-name').textContent = a.display_name || a.name;
+    $('det-display-name').textContent = displayName;
+    $('det-display-name').title = displayName;
     $('det-plan-badge').textContent = acct.plan_label || '未识别';
+    $('det-plan-badge').className = 'plan-badge ' + planTierClass(acct.plan_label);
     $('det-activated-tag').classList.toggle('hidden', !activated);
     $('det-active-tag').classList.toggle('hidden', !a.active);
+    const detSecEl = $('det-sec-badge');
+    if (detSecEl) {
+      const sec = a.security;
+      if (sec && typeof sec.score === 'number') {
+        const cls = sec.grade === 'safe' ? 'safe' : (sec.grade === 'caution' ? 'caution' : 'unsafe');
+        detSecEl.className = `sec-score-badge ${cls}`;
+        detSecEl.textContent = `安全 ${sec.score}分`;
+        detSecEl.title = sec.summary || '点击前往安全检测';
+      } else {
+        detSecEl.className = 'sec-score-badge hidden';
+      }
+    }
     const runTag = $('det-running-tag');
     runTag.classList.toggle('hidden', !a.running_desktop_pid);
     if (a.running_desktop_pid) runTag.textContent = `Desktop PID ${a.running_desktop_pid}`;
@@ -792,20 +867,24 @@
       ? `OAuth 实时 API (${fmtTime(usage.fetched_at)})`
       : usage.source === 'desktop_history'
       ? `Desktop 本地样本 (${fmtTime(usage.fetched_at)})`
+      : usage.source === 'free_tier'
+      ? 'Free 档案（无需额度同步）'
       : '未连接实时 API';
 
-    const bars = [
-      usageBarHTML(usage.five_hour, '5-Hour Limit (5小时额度)'),
-      usageBarHTML(usage.weekly, 'Weekly · All Models (7天总用量)'),
-    ];
-    if (usage.weekly_sonnet) bars.push(usageBarHTML(usage.weekly_sonnet, 'Weekly · Sonnet'));
-    if (usage.weekly_opus) bars.push(usageBarHTML(usage.weekly_opus, 'Weekly · Opus'));
+    const bars = isFree
+      ? [freeUsageNoticeHTML(a)]
+      : [
+          usageBarHTML(usage.five_hour, '5-Hour Limit (5小时额度)'),
+          usageBarHTML(usage.weekly, 'Weekly · All Models (7天总用量)'),
+        ];
+    if (!isFree && usage.weekly_sonnet) bars.push(usageBarHTML(usage.weekly_sonnet, 'Weekly · Sonnet'));
+    if (!isFree && usage.weekly_opus) bars.push(usageBarHTML(usage.weekly_opus, 'Weekly · Opus'));
     if (usage.extra_usage) {
       const eu = usage.extra_usage;
       bars.push(`<div class="kv-row"><span>Extra Usage</span><code>${eu.enabled ? `已开启 · ${eu.used_credits ?? 0} / ${eu.monthly_limit ?? '—'} ${eu.currency || ''}` : '未开启'}</code></div>`);
     }
     $('det-usage-bars').innerHTML = bars.join('');
-    $('det-usage-note').textContent = usage.hint || usage.note || usage.error || '如开启 OAuth API 实时额度同步，可在终端完成 peaceclaude cli 登录';
+    $('det-usage-note').textContent = usage.hint || usage.note || usage.error || (isFree ? '当前账号为免费版（Free），无固定 5h / Weekly 付费配额' : '如开启 OAuth API 实时额度同步，可在终端完成 peaceclaude cli 登录');
 
     const kvRows = [
       ['档案标识与目录', a.dir || a.name],
@@ -882,15 +961,17 @@
       const canFix = c.status !== 'pass' && c.fixable && c.fix_action;
       return `
       <div class="check-row">
-        <div class="check-row-left">
-          <span class="status-tag ${esc(c.status)}">${c.status === 'pass' ? '通过' : c.status === 'warn' ? '提醒' : '失败'}</span>
-          <div>
+        <div class="check-row-head">
+          <div class="check-row-head-left">
+            <span class="status-tag ${esc(c.status)}">${c.status === 'pass' ? '通过' : c.status === 'warn' ? '提醒' : '失败'}</span>
             <div class="check-title">${esc(c.title)}</div>
-            <div class="check-detail">${esc(c.detail)}</div>
-            ${fixText ? `<div class="check-fix">建议：${esc(fixText)}</div>` : ''}
           </div>
+          ${canFix ? `<div class="check-row-act"><button type="button" class="btn ${c.status === 'fail' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-doc-fix-id="${esc(c.id)}" data-doc-fix-act="${esc(c.fix_action)}">${esc(c.fix_label || '一键修复')}</button></div>` : ''}
         </div>
-        ${canFix ? `<div class="check-row-act"><button type="button" class="btn ${c.status === 'fail' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-doc-fix-id="${esc(c.id)}" data-doc-fix-act="${esc(c.fix_action)}">${esc(c.fix_label || '一键修复')}</button></div>` : ''}
+        <div class="check-row-body">
+          <div class="check-detail">${esc(c.detail)}</div>
+          ${fixText ? `<div class="check-fix">建议：${esc(fixText)}</div>` : ''}
+        </div>
       </div>`;
     }).join('');
   }
@@ -1285,7 +1366,7 @@
   $('btn-converge-desktops').addEventListener('click', async () => {
     try {
       const r = await api('/api/launch/desktop', { method: 'POST', body: JSON.stringify({ keep_others: false }) });
-      toast(`已保留默认账号 ${r.profile} (PID ${r.pid})，其余干扰窗口已关闭`);
+      toast(`已保留当前使用账号 ${r.profile} (PID ${r.pid})，其余干扰窗口已关闭`);
       await loadAccounts(false);
     } catch (e) { toast(e.message); }
   });
@@ -1336,13 +1417,19 @@
 
   // Delegated Account Card & Roster Events
   $('tab-accounts').addEventListener('click', async (ev) => {
+    const secBtn = ev.target.closest('[data-acc-security]');
+    if (secBtn) {
+      switchTab('security');
+      return;
+    }
     const deskBtn = ev.target.closest('[data-acc-desktop]');
     const stopBtn = ev.target.closest('[data-acc-stop]');
     const browBtn = ev.target.closest('[data-acc-browser]');
     const detBtn = ev.target.closest('[data-acc-detail]');
     const cliBtn = ev.target.closest('[data-acc-cli]');
     const useBtn = ev.target.closest('[data-acc-use]');
-    if (!deskBtn && !stopBtn && !browBtn && !detBtn && !cliBtn && !useBtn) return;
+    const delBtn = ev.target.closest('[data-acc-delete]');
+    if (!deskBtn && !stopBtn && !browBtn && !detBtn && !cliBtn && !useBtn && !delBtn) return;
     try {
       if (deskBtn) {
         const name = deskBtn.dataset.accDesktop;
@@ -1370,7 +1457,35 @@
         await api('/api/profiles/use', { method: 'POST', body: JSON.stringify({ name }) });
         await refreshAll();
         await loadAccounts(false);
-        toast('已设为默认账号: ' + name);
+        toast('已设为当前使用: ' + name, 'ok');
+      } else if (delBtn) {
+        const name = delBtn.dataset.accDelete;
+        if (pendingConfirm.listDel !== name) {
+          document.querySelectorAll('[data-acc-delete].confirming').forEach((b) => {
+            b.classList.remove('confirming');
+            b.textContent = '删除';
+          });
+          pendingConfirm.listDel = name;
+          delBtn.classList.add('confirming');
+          delBtn.textContent = '确认删除?';
+          clearTimeout(pendingConfirm.listDelTimer);
+          pendingConfirm.listDelTimer = setTimeout(() => {
+            if (pendingConfirm.listDel === name) pendingConfirm.listDel = null;
+            document.querySelectorAll('[data-acc-delete]').forEach((b) => {
+              if (b.dataset.accDelete === name) {
+                b.classList.remove('confirming');
+                b.textContent = '删除';
+              }
+            });
+          }, 4000);
+          return;
+        }
+        clearTimeout(pendingConfirm.listDelTimer);
+        pendingConfirm.listDel = null;
+        delBtn.disabled = true;
+        await api('/api/accounts/delete', { method: 'POST', body: JSON.stringify({ name }) });
+        await Promise.all([refreshAll(), loadAccounts(false)]);
+        toast('已删除账号: ' + name, 'ok');
       }
     } catch (e) { toast(e.message); }
   });
@@ -1433,12 +1548,17 @@
     const cmd = `peaceclaude cli --profile ${currentDetailName}`;
     try { await navigator.clipboard.writeText(cmd); toast('已复制: ' + cmd); } catch { toast(cmd); }
   });
+  $('det-sec-badge')?.addEventListener('click', () => {
+    $('account-detail-modal').classList.add('hidden');
+    switchTab('security');
+  });
   $('det-btn-use').addEventListener('click', async () => {
     if (!currentDetailName) return;
     await api('/api/profiles/use', { method: 'POST', body: JSON.stringify({ name: currentDetailName }) });
     await openAccountDetail(currentDetailName, false);
     await refreshAll();
     await loadAccounts(false);
+    toast('已设为当前使用: ' + currentDetailName, 'ok');
   });
   $('det-edit-form').addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -1490,11 +1610,11 @@
       return;
     }
     pendingConfirm.del = null;
+    $('det-btn-delete').textContent = '删除账号';
     await api('/api/accounts/delete', { method: 'POST', body: JSON.stringify({ name: currentDetailName }) });
     $('account-detail-modal').classList.add('hidden');
-    await refreshAll();
-    await loadAccounts(false);
-    toast('已删除账号');
+    await Promise.all([refreshAll(), loadAccounts(false)]);
+    toast('已删除账号', 'ok');
   });
 
   async function runDoctorFix(payload) {
@@ -1507,7 +1627,7 @@
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
     if (data.doctor) renderDoctor(data.doctor);
-    await Promise.all([refreshAll(), loadAccounts(false)]);
+    await Promise.all([loadDoctor(), refreshAll(), loadAccounts(false)]);
     const acts = data.actions || [];
     const errs = data.errors || (data.error ? [data.error] : []);
     if (errs.length > 0 && acts.length === 0) {
@@ -1806,6 +1926,19 @@
       if (res.status) renderRemote(res.status);
       toast(res.health?.ok ? '自建中继已保存并探测通过' : '已保存自建中继（探测未通: ' + (res.health?.detail || '') + '）');
     } catch (e) { toast(e.message); }
+  });
+
+  // CLI Guide Copy Actions
+  $('tab-cli')?.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button[data-copy-cmd]');
+    if (!btn) return;
+    const cmd = btn.dataset.copyCmd || '';
+    try { await navigator.clipboard.writeText(cmd); toast('已复制命令: ' + cmd, 'ok'); } catch { toast(cmd); }
+  });
+  $('btn-cli-copy-active')?.addEventListener('click', async () => {
+    const active = (statusData && statusData.active_profile) || 'default';
+    const cmd = `peaceclaude cli --profile ${active}`;
+    try { await navigator.clipboard.writeText(cmd); toast('已复制当前使用账号命令: ' + cmd, 'ok'); } catch { toast(cmd); }
   });
 
   // Boot & Theme Hydration

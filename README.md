@@ -147,6 +147,19 @@ peaceclaude vm-proxy install   # 按提示执行 sudo 命令，不清空企业�
 
 ---
 
+## CLI 与控制台详细使用指南（Private 仓库脱敏文档）
+
+> 完整 22 组 CLI 子命令参数详解、CLI 唤起系统浏览器（Arc 等）PAC 安全前置条件、`Privacy -> Location metadata` 防泄露实证说明与全套工作台界面详解，请参阅：[docs/CLI_GUIDE.md](docs/CLI_GUIDE.md)。
+
+- **内嵌 CLI 使用指南**：Web 控制台左侧 **「系统与连接 → CLI 使用指南」** 直接列出全部常用 CLI 指令，支持点击一键复制；
+- **多账号中心与安全检测脱敏预览**（来自 RFC 5737 脱敏沙盒演示数据）：
+
+![多账号中心界面](docs/screenshots/accounts-overview.png)
+
+![安全检测与分诊界面](docs/screenshots/security-doctor.png)
+
+---
+
 ## 开发与测试
 
 ```bash

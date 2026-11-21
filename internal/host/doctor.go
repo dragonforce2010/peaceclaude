@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -512,7 +513,20 @@ func testDirectBlocked(addr string, timeout time.Duration) (bool, string) {
 	if err != nil {
 		return true, err.Error()
 	}
-	_ = conn.Close()
+	defer conn.Close()
+	// On macOS, `pf block drop` on IPv6 can cause non-blocking kqueue Dial to return nil
+	// with an unconnected socket whose first Write immediately fails with ENOTCONN ("socket is not connected").
+	_ = conn.SetDeadline(time.Now().Add(timeout))
+	if _, werr := conn.Write([]byte("HEAD / HTTP/1.0\r\n\r\n")); werr != nil {
+		return true, werr.Error()
+	}
+	var buf [1]byte
+	if _, rerr := conn.Read(buf[:]); rerr != nil {
+		if errors.Is(rerr, io.EOF) {
+			return false, "direct TCP connected (peer EOF)!"
+		}
+		return true, rerr.Error()
+	}
 	return false, "direct TCP connected!"
 }
 

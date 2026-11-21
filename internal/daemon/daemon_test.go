@@ -436,6 +436,83 @@ func TestHandleAccountUpdatePreservesManualLockAndStatusReflectsIdentity(t *test
 	}
 }
 
+func TestDeleteActiveProfileSyncsMemoryConfigAndAccountsExposeSecurityScore(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_NO_NOTIFY", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_AUTO_PEACE", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
+
+	srv := New(config.Default(), "/usr/bin/true")
+
+	// 1. Create a temporary profile and activate it.
+	reqCreate, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/profiles/create", bytes.NewBufferString(`{"name":"temp-acct","display_name":"临时账号","use_now":true}`))
+	reqCreate.Header.Set("Origin", "http://127.0.0.1")
+	rrCreate := newResponseRecorder()
+	srv.withCSRF(srv.handleProfileCreate)(rrCreate, reqCreate)
+	if rrCreate.code != http.StatusOK {
+		t.Fatalf("create failed: %d %s", rrCreate.code, rrCreate.body.String())
+	}
+	if got := srv.configSnapshot().ActiveProfile; got != "temp-acct" {
+		t.Fatalf("expected active temp-acct, got %s", got)
+	}
+
+	// 2. Verify /api/accounts populates security score/grade/summary and reflects FailClosed toggle.
+	reqList, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/api/accounts?with_usage=0", nil)
+	rrList := newResponseRecorder()
+	srv.handleAccounts(rrList, reqList)
+	if rrList.code != http.StatusOK {
+		t.Fatalf("handleAccounts failed: %d", rrList.code)
+	}
+	var listResp struct {
+		Accounts []struct {
+			Name     string          `json:"name"`
+			Security AccountSecurity `json:"security"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(rrList.body.Bytes(), &listResp); err != nil {
+		t.Fatal(err)
+	}
+	if len(listResp.Accounts) < 2 {
+		t.Fatalf("expected >=2 accounts, got %d", len(listResp.Accounts))
+	}
+	scoreBefore := listResp.Accounts[0].Security.Score
+	if scoreBefore <= 0 || scoreBefore > 100 || listResp.Accounts[0].Security.Summary == "" {
+		t.Fatalf("unexpected account security snapshot: %+v", listResp.Accounts[0].Security)
+	}
+
+	srv.mu.Lock()
+	next := *srv.cfg
+	next.Egress.FailClosed = false
+	srv.swapConfigLocked(next)
+	srv.mu.Unlock()
+
+	rrList2 := newResponseRecorder()
+	srv.handleAccounts(rrList2, reqList)
+	var listResp2 struct {
+		Accounts []struct {
+			Security AccountSecurity `json:"security"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(rrList2.body.Bytes(), &listResp2); err != nil {
+		t.Fatal(err)
+	}
+	if listResp2.Accounts[0].Security.Score >= scoreBefore {
+		t.Fatalf("expected disabling FailClosed to drop account security score (< %d), got %d", scoreBefore, listResp2.Accounts[0].Security.Score)
+	}
+
+	// 3. Delete currently active temp-acct; server's in-memory ActiveProfile MUST fall back to "default".
+	reqDel, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/accounts/delete", bytes.NewBufferString(`{"name":"temp-acct"}`))
+	reqDel.Header.Set("Origin", "http://127.0.0.1")
+	rrDel := newResponseRecorder()
+	srv.withCSRF(srv.handleAccountDelete)(rrDel, reqDel)
+	if rrDel.code != http.StatusOK {
+		t.Fatalf("handleAccountDelete failed: %d %s", rrDel.code, rrDel.body.String())
+	}
+	if got := srv.configSnapshot().ActiveProfile; got != "default" {
+		t.Fatalf("expected ActiveProfile to fall back to default after deleting active profile, got %q", got)
+	}
+}
+
 type simpleRecorder struct {
 	code   int
 	header http.Header

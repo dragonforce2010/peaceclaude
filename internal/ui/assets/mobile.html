@@ -220,10 +220,14 @@
                 <div>
                   <strong style="font-weight:500;">${esc(a.display_name || a.name)}</strong>
                   <span class="meta" style="margin-left:6px;">${esc(a.plan_label || '未识别')}</span>
+                  ${a.active ? '<span class="meta" style="margin-left:6px;color:var(--green);font-weight:500;">当前使用</span>' : ''}
                 </div>
                 <span class="meta"><span class="dot ${a.activated ? 'ok' : ''}"></span> ${actLabel}</span>
               </div>
               <div class="meta">${a.email ? esc(a.email) + ' · ' : ''}@${safeName} · ${procLabel}</div>
+              ${(a.usage && (a.usage.status === 'free_no_quota' || a.usage.source === 'free_tier')) ? `
+              <div class="meta" style="margin-top:8px;">免费账号（Free）无 5h / Weekly 付费配额</div>
+              ` : `
               <div class="bar-wrap">
                 <div class="bar-head"><span>5-Hour Limit</span><span>${fh == null ? '—' : fh + '%'}</span></div>
                 <div class="track"><div class="fill ${fillClass(fh)}" style="width:${fh ?? 0}%"></div></div>
@@ -232,10 +236,11 @@
                 <div class="bar-head"><span>Weekly Usage</span><span>${wk == null ? '—' : wk + '%'}</span></div>
                 <div class="track"><div class="fill ${fillClass(wk)}" style="width:${wk ?? 0}%"></div></div>
               </div>
+              `}
               <div class="actions">
                 <button class="btn primary sm" data-act="launch_desktop" data-prof="${safeName}">${a.running_desktop_pid ? '切回前台' : '切换并启动'}</button>
                 ${a.running_desktop_pid ? `<button class="btn sm" data-act="stop_desktop" data-prof="${safeName}">停止</button>` : ''}
-                ${!a.active ? `<button class="btn sm" data-act="set_active" data-prof="${safeName}">设为默认</button>` : ''}
+                ${!a.active ? `<button class="btn sm" data-act="set_active" data-prof="${safeName}">设为使用</button>` : ''}
               </div>
             </div>`;
         }).join('');

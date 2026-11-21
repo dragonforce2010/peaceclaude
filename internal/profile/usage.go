@@ -216,6 +216,21 @@ func readAccountIdentity(p *Profile) AccountIdentity {
 		}
 	}
 
+	// 3b. Enrich account/org UUID from Desktop config metadata (non-secret fields only).
+	if deskAcctUUID, deskOrgUUID := readDesktopAccountMetadata(p.DesktopDir); deskAcctUUID != "" || deskOrgUUID != "" {
+		if id.AccountUUID == "" {
+			id.AccountUUID = deskAcctUUID
+		}
+		if id.OrgUUID == "" {
+			id.OrgUUID = deskOrgUUID
+		}
+		if id.Source == "none" && p.HasDesktopAuth {
+			id.Source = "desktop_config"
+		}
+	} else if id.Source == "none" && p.HasDesktopAuth {
+		id.Source = "desktop_config"
+	}
+
 	// 4. Apply manual values: when ManualLocked=true (edited in detail modal), override even after login;
 	// otherwise treat creation defaults as fallback before real Anthropic metadata is synced.
 	if strings.TrimSpace(p.ManualPlan) != "" && (p.ManualLocked || id.PlanLabel == "未识别" || id.PlanLabel == "") {
@@ -231,6 +246,15 @@ func readAccountIdentity(p *Profile) AccountIdentity {
 			if id.Source == "none" {
 				id.Source = "manual"
 			}
+		}
+	}
+
+	// 5. Infer Free vs Pro for activated Desktop accounts when Anthropic tier keys aren't present locally.
+	if (id.PlanLabel == "未识别" || id.PlanLabel == "") && (p.HasDesktopAuth || p.HasCLICreds) {
+		if _, hasPaidQuota := hasDesktopPaidUsageSample(p.DesktopDir); hasPaidQuota {
+			id.PlanLabel = "Pro"
+		} else {
+			id.PlanLabel = "Free"
 		}
 	}
 
@@ -336,7 +360,11 @@ func FetchUsage(ctx context.Context, cfg *config.Config, prof *Profile, gateOpen
 	}
 
 	if snap.Status == "" {
-		if token == "" {
+		if token == "" && strings.EqualFold(strings.TrimSpace(prof.Account.PlanLabel), "Free") {
+			snap.Status = "free_no_quota"
+			snap.Source = "free_tier"
+			snap.Hint = "免费账号（Free）不含 5-Hour / Weekly 付费配额接口，无法获取实时用量进度；升级 Pro / Max 后将自动采集"
+		} else if token == "" {
 			snap.Status = "no_token"
 			snap.Hint = fmt.Sprintf("该档案尚未绑定 Claude Code OAuth 凭据；运行 `peaceclaude cli --profile %s` 登录一次即可自动采集实时 5h 与 Weekly 用量，也可先查看/标注账号套餐与注册时间", prof.Name)
 		} else {
@@ -524,4 +552,70 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// readDesktopAccountMetadata reads ONLY non-secret account/org UUIDs from Electron desktop-data.
+func readDesktopAccountMetadata(desktopDir string) (accountUUID, orgUUID string) {
+	if strings.TrimSpace(desktopDir) == "" {
+		return "", ""
+	}
+	if raw, err := os.ReadFile(filepath.Join(desktopDir, "config.json")); err == nil && len(raw) > 0 {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil {
+			if v, _ := m["lastKnownAccountUuid"].(string); strings.TrimSpace(v) != "" {
+				accountUUID = strings.TrimSpace(v)
+			}
+			if ssh, ok := m["sshTransportFlagLastAnswer"].(map[string]any); ok {
+				if accountUUID == "" {
+					if v, _ := ssh["accountUuid"].(string); strings.TrimSpace(v) != "" {
+						accountUUID = strings.TrimSpace(v)
+					}
+				}
+				if v, _ := ssh["orgUuid"].(string); strings.TrimSpace(v) != "" {
+					orgUUID = strings.TrimSpace(v)
+				}
+			}
+			if orgUUID == "" {
+				for k := range m {
+					if strings.HasPrefix(k, "dxt:allowlistEnabled:") {
+						cand := strings.TrimSpace(strings.TrimPrefix(k, "dxt:allowlistEnabled:"))
+						if cand != "" {
+							orgUUID = cand
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+	if accountUUID == "" {
+		if raw, err := os.ReadFile(filepath.Join(desktopDir, "cowork-enabled-cli-ops.json")); err == nil && len(raw) > 0 {
+			var doc struct {
+				OwnerAccountID string `json:"ownerAccountId"`
+			}
+			if json.Unmarshal(raw, &doc) == nil {
+				accountUUID = strings.TrimSpace(doc.OwnerAccountID)
+			}
+		}
+	}
+	return accountUUID, orgUUID
+}
+
+func hasDesktopPaidUsageSample(desktopDir string) (hasFile bool, hasQuotaValues bool) {
+	raw, err := os.ReadFile(filepath.Join(desktopDir, "plan-usage-history.json"))
+	if err != nil || len(raw) == 0 {
+		return false, false
+	}
+	var hist struct {
+		Samples []desktopUsageSample `json:"samples"`
+	}
+	if json.Unmarshal(raw, &hist) != nil {
+		return true, false
+	}
+	for _, s := range hist.Samples {
+		if len(s.U) > 0 {
+			return true, true
+		}
+	}
+	return len(hist.Samples) > 0, false
 }
