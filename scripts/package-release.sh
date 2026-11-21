@@ -72,35 +72,37 @@ trap cleanup EXIT
 
 echo "=== 打包 PeaceClaude v${VER} (${COMMIT}) [macOS Universal arm64 + x86_64] ==="
 
+mkdir -p "$WORK/cli" "$WORK/appbin"
+
 # 1. Build Universal Go CLI binary
 echo "→ 编译 Universal Go 二进制..."
 (
   cd "$ROOT"
-  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/peaceclaude-arm64" ./cmd/peaceclaude
-  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/peaceclaude-amd64" ./cmd/peaceclaude
+  CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/cli/peaceclaude-arm64" ./cmd/peaceclaude
+  CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "$LDFLAGS" -o "$WORK/cli/peaceclaude-amd64" ./cmd/peaceclaude
 )
-lipo -create "$WORK/peaceclaude-arm64" "$WORK/peaceclaude-amd64" -output "$WORK/peaceclaude"
-chmod 755 "$WORK/peaceclaude"
+lipo -create "$WORK/cli/peaceclaude-arm64" "$WORK/cli/peaceclaude-amd64" -output "$WORK/cli/peaceclaude"
+chmod 755 "$WORK/cli/peaceclaude"
 
 # 2. Build Universal Swift macOS App launcher binary
 echo "→ 编译 Universal Swift 桌面端二进制..."
 SWIFT_SRC="$ROOT/internal/launcher/app_macos.swift"
-swiftc -O -target arm64-apple-macosx12.0 -framework Cocoa -framework WebKit "$SWIFT_SRC" -o "$WORK/PeaceClaude-arm64"
-swiftc -O -target x86_64-apple-macosx12.0 -framework Cocoa -framework WebKit "$SWIFT_SRC" -o "$WORK/PeaceClaude-x86_64"
-lipo -create "$WORK/PeaceClaude-arm64" "$WORK/PeaceClaude-x86_64" -output "$WORK/PeaceClaude"
-chmod 755 "$WORK/PeaceClaude"
+swiftc -O -target arm64-apple-macosx12.0 -framework Cocoa -framework WebKit "$SWIFT_SRC" -o "$WORK/appbin/PeaceClaude-arm64"
+swiftc -O -target x86_64-apple-macosx12.0 -framework Cocoa -framework WebKit "$SWIFT_SRC" -o "$WORK/appbin/PeaceClaude-x86_64"
+lipo -create "$WORK/appbin/PeaceClaude-arm64" "$WORK/appbin/PeaceClaude-x86_64" -output "$WORK/appbin/PeaceClaude"
+chmod 755 "$WORK/appbin/PeaceClaude"
 
 # 3. Assemble self-contained PeaceClaude.app using built CLI for Info.plist & AppIcon.icns
 echo "→ 组装自包含 Universal PeaceClaude.app..."
 mkdir -p "$WORK/app-stage" "$WORK/fake-home"
-PEACECLAUDE_HOME="$WORK/fake-home" "$WORK/peaceclaude" app install --dir "$WORK/app-stage"
+PEACECLAUDE_HOME="$WORK/fake-home" "$WORK/cli/peaceclaude" app install --dir "$WORK/app-stage"
 APP="$WORK/app-stage/PeaceClaude.app"
 
-cp "$WORK/PeaceClaude" "$APP/Contents/MacOS/PeaceClaude"
+cp "$WORK/appbin/PeaceClaude" "$APP/Contents/MacOS/PeaceClaude"
 chmod 755 "$APP/Contents/MacOS/PeaceClaude"
 
 mkdir -p "$APP/Contents/Resources/bin"
-cp "$WORK/peaceclaude" "$APP/Contents/Resources/bin/peaceclaude"
+cp "$WORK/cli/peaceclaude" "$APP/Contents/Resources/bin/peaceclaude"
 chmod 755 "$APP/Contents/Resources/bin/peaceclaude"
 
 xattr -cr "$APP" 2>/dev/null || true
@@ -122,11 +124,11 @@ assert_universal() {
   echo "  ✔ $info"
 }
 
-assert_universal "$WORK/peaceclaude"
+assert_universal "$WORK/cli/peaceclaude"
 assert_universal "$APP/Contents/MacOS/PeaceClaude"
 assert_universal "$APP/Contents/Resources/bin/peaceclaude"
 
-SMOKE_VER="$("$WORK/peaceclaude" --version)"
+SMOKE_VER="$("$WORK/cli/peaceclaude" --version)"
 if [ "$SMOKE_VER" != "peaceclaude ${VER} (${COMMIT})" ]; then
   echo "✖ 版本输出不符合预期: $SMOKE_VER (期望: peaceclaude ${VER} (${COMMIT}))" >&2
   exit 1
@@ -182,7 +184,7 @@ TAR_FOLDER="peaceclaude-v${VER}-macos-universal"
 TAR_STAGE="$WORK/tar-parent/${TAR_FOLDER}"
 mkdir -p "$TAR_STAGE"
 
-cp "$WORK/peaceclaude" "$TAR_STAGE/peaceclaude"
+cp "$WORK/cli/peaceclaude" "$TAR_STAGE/peaceclaude"
 chmod 755 "$TAR_STAGE/peaceclaude"
 ditto "$APP" "$TAR_STAGE/PeaceClaude.app"
 cp "$WORK/README-INSTALL.txt" "$TAR_STAGE/README-INSTALL.txt"
