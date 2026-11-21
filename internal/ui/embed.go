@@ -16,3 +16,7 @@ func Handler() http.Handler {
 	}
 	return http.FileServer(http.FS(sub))
 }
+
+func MobileHTML() ([]byte, error) {
+	return assetsFS.ReadFile("assets/mobile.html")
+}

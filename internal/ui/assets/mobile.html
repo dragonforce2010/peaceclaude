@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+  <title>PeaceClaude · 移动控制台</title>
+  <style>
+    :root {
+      --bg: #141415;
+      --card: #19191b;
+      --raised: #232325;
+      --line: rgba(237, 237, 237, 0.08);
+      --line-strong: rgba(237, 237, 237, 0.16);
+      --text: #ededed;
+      --sec: #a1a1a6;
+      --muted: #85858b;
+      --accent: #e07a55;
+      --green: #4cc38a;
+      --amber: #f5b849;
+      --red: #e5484d;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafafa;
+        --card: #ffffff;
+        --raised: #f4f4f5;
+        --line: rgba(23, 23, 23, 0.08);
+        --line-strong: rgba(23, 23, 23, 0.15);
+        --text: #171717;
+        --sec: #525252;
+        --muted: #737373;
+        --accent: #c85a32;
+        --green: #16a34a;
+        --amber: #b45309;
+        --red: #dc2626;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0 auto;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      max-width: 560px;
+      font-variant-numeric: tabular-nums;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 16px;
+    }
+    h1 { font-size: 16px; font-weight: 500; margin: 0; letter-spacing: -0.01em; }
+    .sub { font-size: 12px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; background: var(--muted); }
+    .dot.ok { background: var(--green); }
+    .dot.bad { background: var(--red); }
+    .btn {
+      border: 1px solid var(--line-strong);
+      background: var(--raised);
+      color: var(--text);
+      border-radius: 8px;
+      height: 36px;
+      padding: 0 14px;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .btn.primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .btn.sm { height: 32px; padding: 0 12px; font-size: 12.5px; }
+    .btn:disabled { opacity: 0.5; }
+    .bar-wrap { margin-top: 12px; }
+    .bar-head { display: flex; justify-content: space-between; font-size: 12px; color: var(--sec); margin-bottom: 4px; }
+    .track { height: 7px; border-radius: 4px; background: var(--raised); overflow: hidden; }
+    .fill { height: 100%; background: var(--accent); border-radius: 4px; }
+    .fill.ok { background: var(--green); }
+    .fill.warn { background: var(--amber); }
+    .fill.danger { background: var(--red); }
+    input {
+      width: 100%;
+      height: 40px;
+      padding: 0 12px;
+      background: var(--raised);
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+      font-family: var(--mono);
+      margin-bottom: 12px;
+    }
+    .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .toast {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 16px;
+      padding: 10px 14px;
+      background: var(--raised);
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>PeaceClaude 远程控制台</h1>
+      <div class="sub" id="gate-summary">正在校验配对凭证…</div>
+    </div>
+    <button class="btn sm" id="btn-refresh">刷新</button>
+  </header>
+
+  <section class="card" id="pair-box" style="display:none;">
+    <div style="font-weight:500;margin-bottom:4px;">输入一次性配对码</div>
+    <div class="meta" style="margin-bottom:12px;">在电脑端「远程配对」生成通行证后可直接扫码，或粘贴 PEACE- 配对码</div>
+    <input id="pair-input" placeholder="PEACE-..." autocomplete="off" />
+    <button class="btn primary" id="btn-pair">连接工作台</button>
+    <div class="meta" id="pair-err" style="color:var(--red);"></div>
+  </section>
+
+  <main id="content" style="display:none;">
+    <div class="card">
+      <div class="row">
+        <div>
+          <span class="dot" id="gate-dot"></span>
+          <strong id="gate-title" style="font-weight:500;margin-left:6px;">出口检测中</strong>
+        </div>
+        <button class="btn sm" id="btn-check-gate">重检出口</button>
+      </div>
+      <div class="meta" id="gate-meta">—</div>
+    </div>
+    <div id="account-list"></div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const TOKEN_KEY = 'peaceclaude_mobile_token';
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+    const toast = (msg) => {
+      const el = $('toast');
+      el.textContent = msg;
+      el.style.display = 'block';
+      clearTimeout(toast._t);
+      toast._t = setTimeout(() => { el.style.display = 'none'; }, 3000);
+    };
+    const pct = (u) => u && typeof u.utilization === 'number' ? Math.max(0, Math.min(100, Math.round(u.utilization))) : null;
+    const fillClass = (v) => v == null ? '' : v >= 85 ? 'danger' : v >= 65 ? 'warn' : 'ok';
+
+    async function callAPI(path, method = 'GET', body) {
+      const tok = localStorage.getItem(TOKEN_KEY) || '';
+      const headers = { 'Content-Type': 'application/json' };
+      if (tok) headers.Authorization = 'Bearer ' + tok;
+      const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : undefined });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+      return data;
+    }
+
+    async function redeem(code) {
+      const os = /iPhone|iPad|iOS/i.test(navigator.userAgent) ? 'iOS' : /Android/i.test(navigator.userAgent) ? 'Android' : 'Mobile Web';
+      const data = await callAPI('/mobile/api/redeem', 'POST', { code, device_name: '手机浏览器', os });
+      localStorage.setItem(TOKEN_KEY, data.token);
+      if (location.hash) history.replaceState(null, '', location.pathname);
+      await loadState(false);
+    }
+
+    async function loadState(refresh = false) {
+      const tok = localStorage.getItem(TOKEN_KEY);
+      if (!tok) {
+        $('pair-box').style.display = 'block';
+        $('content').style.display = 'none';
+        $('gate-summary').textContent = '未配对';
+        return;
+      }
+      try {
+        const s = await callAPI('/mobile/api/state' + (refresh ? '?refresh=1' : ''));
+        $('pair-box').style.display = 'none';
+        $('content').style.display = 'block';
+        const g = s.gate || {};
+        const open = !!g.open;
+        $('gate-dot').className = 'dot ' + (open ? 'ok' : 'bad');
+        $('gate-title').textContent = open ? '静态出口放行' : 'Fail-Closed 门禁锁定';
+        const ip = (g.last_good && g.last_good.egress_ip) || '—';
+        const geo = g.last_good ? `${g.last_good.country || ''} ${g.last_good.city || ''}`.trim() : '';
+        $('gate-summary').textContent = `${ip} · ${g.effective_timezone || '—'}`;
+        $('gate-meta').textContent = `IP ${ip} ${geo ? '· ' + geo : ''} · 语言 ${g.effective_language || 'en-US'}`;
+
+        $('account-list').innerHTML = (s.accounts || []).map((a) => {
+          const fh = pct(a.usage && a.usage.five_hour);
+          const wk = pct(a.usage && a.usage.weekly);
+          const actLabel = a.activated ? '已激活' : '未登录';
+          const procLabel = a.running_desktop_pid ? `Desktop PID ${esc(a.running_desktop_pid)}` : 'Desktop 未启动';
+          const safeName = esc(a.name);
+          return `
+            <div class="card">
+              <div class="row">
+                <div>
+                  <strong style="font-weight:500;">${esc(a.display_name || a.name)}</strong>
+                  <span class="meta" style="margin-left:6px;">${esc(a.plan_label || '未识别')}</span>
+                </div>
+                <span class="meta"><span class="dot ${a.activated ? 'ok' : ''}"></span> ${actLabel}</span>
+              </div>
+              <div class="meta">${a.email ? esc(a.email) + ' · ' : ''}@${safeName} · ${procLabel}</div>
+              <div class="bar-wrap">
+                <div class="bar-head"><span>5-Hour Limit</span><span>${fh == null ? '—' : fh + '%'}</span></div>
+                <div class="track"><div class="fill ${fillClass(fh)}" style="width:${fh ?? 0}%"></div></div>
+              </div>
+              <div class="bar-wrap">
+                <div class="bar-head"><span>Weekly Usage</span><span>${wk == null ? '—' : wk + '%'}</span></div>
+                <div class="track"><div class="fill ${fillClass(wk)}" style="width:${wk ?? 0}%"></div></div>
+              </div>
+              <div class="actions">
+                <button class="btn primary sm" data-act="launch_desktop" data-prof="${safeName}">${a.running_desktop_pid ? '切回前台' : '切换并启动'}</button>
+                ${a.running_desktop_pid ? `<button class="btn sm" data-act="stop_desktop" data-prof="${safeName}">停止</button>` : ''}
+                ${!a.active ? `<button class="btn sm" data-act="set_active" data-prof="${safeName}">设为默认</button>` : ''}
+              </div>
+            </div>`;
+        }).join('');
+      } catch (e) {
+        localStorage.removeItem(TOKEN_KEY);
+        $('pair-box').style.display = 'block';
+        $('content').style.display = 'none';
+        $('pair-err').textContent = e.message;
+        $('gate-summary').textContent = '凭证失效';
+      }
+    }
+
+    $('btn-pair').onclick = async () => {
+      try {
+        $('pair-err').textContent = '';
+        await redeem($('pair-input').value.trim());
+      } catch (e) { $('pair-err').textContent = e.message; }
+    };
+    $('btn-refresh').onclick = () => loadState(true);
+    $('btn-check-gate').onclick = async () => {
+      try {
+        await callAPI('/mobile/api/action', 'POST', { action: 'check_gate' });
+        await loadState(false);
+        toast('已重新校验出口门禁');
+      } catch (e) { toast(e.message); }
+    };
+    $('account-list').onclick = async (ev) => {
+      const btn = ev.target.closest('[data-act]');
+      if (!btn) return;
+      try {
+        await callAPI('/mobile/api/action', 'POST', { action: btn.dataset.act, profile: btn.dataset.prof });
+        await loadState(false);
+        toast('操作已完成');
+      } catch (e) { toast(e.message); }
+    };
+
+    (async () => {
+      const m = /pair=([^&]+)/.exec(location.hash || '');
+      if (m && m[1]) {
+        try { await redeem(decodeURIComponent(m[1])); return; }
+        catch (e) { $('pair-err').textContent = e.message; }
+      }
+      await loadState(false);
+    })();
+  </script>
+</body>
+</html>

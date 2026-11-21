@@ -10,14 +10,16 @@
 
 | 模块 | 解决什么问题 | 实现机制 |
 |---|---|---|
-| **Fail-Closed 出口门禁** | 代理断开/规则被清空/IP 漂移时直连 Anthropic 触发风控 | 本地 Go 守护网关（HTTP `:18897` / SOCKS5 `:18898`），启动前及周期探测真实出口 IPv4，偏离 `expected_ip` 或上游故障立即熔断 `503` 并切断活跃连接，**绝不回退直连** |
+| **Fail-Closed 出口门禁** | 代理断开/规则被清空/IP 漂移时直连 Anthropic 触发风控 | 本地 Go 守护网关（HTTP `:18897` / SOCKS5 `:18898`），4 源并行竞速探活 + IP 漂移 0 容忍秒锁，瞬态抖动快速复检不误杀；启用 `TCP_NODELAY`、瞬断重试、备用上游切换与半关闭连接回收，**绝不回退直连** |
 | **双模式静态 IP 上游** | 既想开箱复用本机 Clash Verge，又想彻底消除 Split-IP 双出口 | 支持 `local-proxy`（无缝接管 `127.0.0.1:7897` 并自动检测 Split-IP 预警）与 `direct-socks5` / `direct-http`（直连 Webshare SOCKS5，远端解析 DNS，解决 `platform.claude.com` OAuth HTTP CONNECT RST 问题） |
 | **时区与语言指纹同步** | macOS 本机 `Asia/Shanghai` + `zh-CN` 撞上美国静态 IP | 根据出口 IP 精准查询 IANA 时区（如自动对齐 `America/Denver` / `America/New_York`），启动 CLI / Desktop / 登录浏览器时自动注入 `TZ`、`LANG=en_US.UTF-8`、`--lang=en-US` |
 | **统一托管 CLI & Desktop + Auto-Peace 防误点** | 容易误点原生图标或被宿主机 `ANTHROPIC_BASE_URL` 中转污染 | `peaceclaude cli` 自动定位最新版原生二进制并剥离宿主机污染变量；`/Applications/PeaceClaude.app` 强制独立 `--user-data-dir`、`--proxy-server`、`--disable-quic`（兼容官方 Claude.app v6+ 启动校验）并内置启动探活与窗口置顶；后台实时守护，误点原生 `Claude.app` 自动接管重开 |
-| **多浏览器全入口覆盖 (PAC + 隔离浏览器)** | 普通浏览器访问 `claude.ai` 缺乏 Fail-Closed 门禁或指纹混用 | 提供 `peaceclaude browser-pac on`（仅路由 Claude/Anthropic 域名走静态 IP 门禁，不影响飞连与日常网页）以及 `peaceclaude login-browser`（独立 Cookie + 美区时区/语言全隔离） |
-| **多档案隔离 + 全局规则共享** | 多账号串味，但又不想重复维护 `CLAUDE.md` 和 `skills` | `profile` 隔离 `CLAUDE_CONFIG_DIR` / Desktop 数据 / 隔离浏览器 / 设备指纹；`rules on` 跨档案共享 `CLAUDE.md`、`skills`、`agents`、`hooks` |
+| **多浏览器全入口覆盖 (PAC + 隔离浏览器)** | 普通浏览器或 Desktop 唤起 Google OAuth 时直连 `claude.ai` 触发 403 | `pac.go` 与 `policy.go` 共享完整 OAuth/Captcha 资源域（覆盖 `accounts.google.com`/`gstatic.com`/`googleapis.com`/`googleusercontent.com`），`www.google.com` 与飞连内网保持 `DIRECT`；多账号页在未开 PAC 时自动提示一键开启 |
+| **多账号管理、套餐与实时用量中心** | 多账号容易串号或网页登录回调「打开 Claude」发偏无响应 | 采用 **Hero 默认焦点仪表卡 + 待命账号列对齐清单** 原创布局：清晰区分「已激活」vs「未登录」及 `Desktop PID`，内置 **单活切换模式** 平滑关闭干扰实例并透传 `claude://` 深链 |
+| **Unslop 原创外观工坊与一体式指令托盘** | 默认设置界面单一，缺实时画布与快捷锁屏控制 | 按 `unslop` 精密仪器美学原创设计：统一单层侧栏、单行遥测顶轨、7:5 实时微缩画布外观工坊（5 套浅色 / 5 套深色原创色板 + 三原色微调 + JSON 导入导出）、左下角集成快捷面板支持内联主题速切与 `⌘L` 一键锁屏 |
+| **手机扫码远程配对台与移动控制台** | 需要手机端快速查看余额、切换默认号或唤醒 Desktop | 7:5 连接拓扑与 120s 实时倒计时「配对通行证」，内置纯 Go ISO-18004 SVG 二维码（`/mobile` 支持浅/深自适应），支持局域网 / Tailscale 限权 Bearer 直连与随时撤销授权设备 |
 | **遥测屏蔽盾** | 客户端埋点泄露宿主机异常与设备指纹 | 网关层阻断 `sentry.io`、`statsigapi.net`、`segment.io` 等遥测域名 + CLI 注入 `DISABLE_TELEMETRY=1` |
-| **直通泄漏审计 & 脱敏抓包** | 看不清有没有绕过代理，403 不知道怎么查 | `leaks` 审计 Split-IP/拦截事件 + 后台 `lsof` 扫描宿主机直连 Anthropic Socket；`capture` 脱敏抓包强制 `<redacted>` 一切 Authorization/Cookie/API Key |
+| **直通泄漏审计 & 30 天滚动存储** | 日志长期累计占磁盘，403 不知道怎么查 | `leaks` 与脱敏 `capture`（自动脱敏 Authorization/Cookie/OAuth Code）均默认保留最近 **30 天**并每 6 小时自动滚动清理（辅以 10MB 单文本日志上限）；所有配置存于 `~/.peaceclaude/` (`0700`/`0600`) 本地 JSON 目录 |
 | **403 三分诊 & 可恢复指纹清理** | 看到 403 误点 Sign Out 伤 Token；换号清理怕误删 skills | `diagnose` 自动区分 `network` / `auth` / `unknown`；`clean` 盘点+自动备份+保留 `CLAUDE.md/skills/settings.json` |
 | **macOS pf 护盾 & Cowork `vm-proxy`** | 兜底任何绕过环境变量直连或 Cowork VM 泄漏 | 自动生成经 `pfctl -n` 校验的 `pf` Kill-Switch 与 Cowork 子网规则（绝不开 TUN，绝不冲突企业飞连） |
 | **零依赖内嵌 Web 控制台** | 命令行之外一眼看清安全状态 | `http://127.0.0.1:18899` 提供安全评分环、浏览器本地指纹自检、档案管理、抓包与一键启动 |

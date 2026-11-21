@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const CurrentVersion = 1
@@ -56,6 +57,7 @@ type IdentityConfig struct {
 	DisableDesktopQUIC    bool   `json:"disable_desktop_quic"`
 	BlockDesktopLocalDNS  bool   `json:"block_desktop_local_dns"`
 	AutoPeaceDesktop       bool   `json:"auto_peace_desktop"`
+	SingleActiveDesktop   bool   `json:"single_active_desktop"`
 }
 
 type ShieldConfig struct {
@@ -83,17 +85,78 @@ type BinariesConfig struct {
 	LoginBrowserApp  string `json:"login_browser_app,omitempty"`
 }
 
+type ThemeOverride struct {
+	Accent string `json:"accent,omitempty"`
+	Bg     string `json:"bg,omitempty"`
+	Text   string `json:"text,omitempty"`
+}
+
+type SavedTheme struct {
+	ID          string        `json:"id"`
+	Name        string        `json:"name"`
+	ThemeMode   string        `json:"theme_mode,omitempty"`
+	PresetLight string        `json:"preset_light,omitempty"`
+	PresetDark  string        `json:"preset_dark,omitempty"`
+	Light       ThemeOverride `json:"light"`
+	Dark        ThemeOverride `json:"dark"`
+	UIFont      string        `json:"ui_font,omitempty"`
+	CodeFont    string        `json:"code_font,omitempty"`
+}
+
+type AppearanceConfig struct {
+	ThemeMode    string         `json:"theme_mode"`
+	PresetLight  string         `json:"preset_light"`
+	PresetDark   string         `json:"preset_dark"`
+	CustomLight  *ThemeOverride `json:"custom_light,omitempty"`
+	CustomDark   *ThemeOverride `json:"custom_dark,omitempty"`
+	SavedThemes  []SavedTheme   `json:"saved_themes,omitempty"`
+	ActiveSaved  string         `json:"active_saved_theme,omitempty"`
+	UIFont       string         `json:"ui_font,omitempty"`
+	CodeFont     string         `json:"code_font,omitempty"`
+	UIFontSize   int            `json:"ui_font_size,omitempty"`
+	CodeFontSize int            `json:"code_font_size,omitempty"`
+}
+
+type PairedDevice struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	OS         string    `json:"os"`
+	TokenHash  string    `json:"-"`
+	PairedAt   time.Time `json:"paired_at"`
+	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
+}
+
+type RemoteConfig struct {
+	Enabled         bool           `json:"enabled"`
+	RelayMode       string         `json:"relay_mode"` // "lan" | "custom" | "official"
+	CustomRelayURL  string         `json:"custom_relay_url,omitempty"`
+	RelayAdminToken string         `json:"relay_admin_token,omitempty"`
+	MobilePort      int            `json:"mobile_port"`
+	PairedDevices   []PairedDevice `json:"paired_devices,omitempty"`
+}
+
+type RedactedRemote struct {
+	Enabled        bool           `json:"enabled"`
+	RelayMode      string         `json:"relay_mode"`
+	CustomRelayURL string         `json:"custom_relay_url,omitempty"`
+	HasAdminToken  bool           `json:"has_admin_token"`
+	MobilePort     int            `json:"mobile_port"`
+	PairedDevices  []PairedDevice `json:"paired_devices,omitempty"`
+}
+
 type Config struct {
-	Version       int            `json:"version"`
-	ActiveProfile string         `json:"active_profile"`
-	Listen        ListenConfig   `json:"listen"`
-	Upstream      UpstreamConfig `json:"upstream"`
-	Egress        EgressConfig   `json:"egress"`
-	Identity      IdentityConfig `json:"identity"`
-	Shield        ShieldConfig   `json:"shield"`
-	Rules         RulesConfig    `json:"rules"`
-	Capture       CaptureConfig  `json:"capture"`
-	Binaries      BinariesConfig `json:"binaries"`
+	Version       int              `json:"version"`
+	ActiveProfile string           `json:"active_profile"`
+	Listen        ListenConfig     `json:"listen"`
+	Upstream      UpstreamConfig   `json:"upstream"`
+	Egress        EgressConfig     `json:"egress"`
+	Identity      IdentityConfig   `json:"identity"`
+	Shield        ShieldConfig     `json:"shield"`
+	Rules         RulesConfig      `json:"rules"`
+	Capture       CaptureConfig    `json:"capture"`
+	Binaries      BinariesConfig   `json:"binaries"`
+	Appearance    AppearanceConfig `json:"appearance"`
+	Remote        RemoteConfig     `json:"remote"`
 }
 
 // RedactedUpstream hides secrets while preserving diagnostic visibility.
@@ -119,6 +182,8 @@ type RedactedConfig struct {
 	Rules         RulesConfig      `json:"rules"`
 	Capture       CaptureConfig    `json:"capture"`
 	Binaries      BinariesConfig   `json:"binaries"`
+	Appearance    AppearanceConfig `json:"appearance"`
+	Remote        RedactedRemote   `json:"remote"`
 }
 
 func (c *Config) Redacted() RedactedConfig {
@@ -136,12 +201,21 @@ func (c *Config) Redacted() RedactedConfig {
 			ClashSocket:    c.Upstream.ClashSocket,
 			Label:          c.Upstream.Label,
 		},
-		Egress:   c.Egress,
-		Identity: c.Identity,
-		Shield:   c.Shield,
-		Rules:    c.Rules,
-		Capture:  c.Capture,
-		Binaries: c.Binaries,
+		Egress:     c.Egress,
+		Identity:   c.Identity,
+		Shield:     c.Shield,
+		Rules:      c.Rules,
+		Capture:    c.Capture,
+		Binaries:   c.Binaries,
+		Appearance: c.Appearance,
+		Remote: RedactedRemote{
+			Enabled:        c.Remote.Enabled,
+			RelayMode:      c.Remote.RelayMode,
+			CustomRelayURL: c.Remote.CustomRelayURL,
+			HasAdminToken:  c.Remote.RelayAdminToken != "",
+			MobilePort:     c.Remote.MobilePort,
+			PairedDevices:  c.Remote.PairedDevices,
+		},
 	}
 }
 
@@ -256,6 +330,7 @@ func Default() *Config {
 			DisableDesktopQUIC:    true,
 			BlockDesktopLocalDNS:  true,
 			AutoPeaceDesktop:       true,
+			SingleActiveDesktop:   true,
 		},
 		Shield: ShieldConfig{
 			TelemetryShield:      true,
@@ -277,6 +352,18 @@ func Default() *Config {
 			ClaudeCLIPath:    "",
 			ClaudeDesktopApp: "/Applications/Claude.app",
 			LoginBrowserApp:  "",
+		},
+		Appearance: AppearanceConfig{
+			ThemeMode:    "dark",
+			PresetLight:  "paper",
+			PresetDark:   "obsidian",
+			UIFontSize:   14,
+			CodeFontSize: 12,
+		},
+		Remote: RemoteConfig{
+			Enabled:    false,
+			RelayMode:  "lan",
+			MobilePort: 18900,
 		},
 	}
 }
@@ -336,6 +423,29 @@ func (c *Config) Normalize() {
 	}
 	if c.Binaries.ClaudeDesktopApp == "" {
 		c.Binaries.ClaudeDesktopApp = def.Binaries.ClaudeDesktopApp
+	}
+	if c.Appearance.ThemeMode != "light" && c.Appearance.ThemeMode != "dark" && c.Appearance.ThemeMode != "system" {
+		c.Appearance.ThemeMode = def.Appearance.ThemeMode
+	}
+	if c.Appearance.PresetLight == "" {
+		c.Appearance.PresetLight = def.Appearance.PresetLight
+	}
+	if c.Appearance.PresetDark == "" {
+		c.Appearance.PresetDark = def.Appearance.PresetDark
+	}
+	if c.Appearance.UIFontSize < 12 || c.Appearance.UIFontSize > 20 {
+		c.Appearance.UIFontSize = def.Appearance.UIFontSize
+	}
+	if c.Appearance.CodeFontSize < 11 || c.Appearance.CodeFontSize > 18 {
+		c.Appearance.CodeFontSize = def.Appearance.CodeFontSize
+	}
+	switch c.Remote.RelayMode {
+	case "lan", "custom", "official":
+	default:
+		c.Remote.RelayMode = def.Remote.RelayMode
+	}
+	if c.Remote.MobilePort < 1024 || c.Remote.MobilePort > 65535 {
+		c.Remote.MobilePort = def.Remote.MobilePort
 	}
 }
 

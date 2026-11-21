@@ -28,22 +28,57 @@ type Fingerprint struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type AccountIdentity struct {
+	AccountUUID          string     `json:"account_uuid,omitempty"`
+	Email                string     `json:"email,omitempty"`
+	DisplayName          string     `json:"display_name,omitempty"`
+	OrgUUID              string     `json:"org_uuid,omitempty"`
+	OrgName              string     `json:"org_name,omitempty"`
+	OrgType              string     `json:"org_type,omitempty"`
+	PlanLabel            string     `json:"plan_label"`
+	RateLimitTier        string     `json:"rate_limit_tier,omitempty"`
+	BillingType          string     `json:"billing_type,omitempty"`
+	AccountCreatedAt     *time.Time `json:"account_created_at,omitempty"`
+	SubscriptionAt       *time.Time `json:"subscription_created_at,omitempty"`
+	AccountAgeText       string     `json:"account_age_text,omitempty"`
+	SubscriptionAgeText  string     `json:"subscription_age_text,omitempty"`
+	HasExtraUsageEnabled bool       `json:"has_extra_usage_enabled"`
+	Source               string     `json:"source"` // claude_json | manual | none
+}
+
+type MetaPatch struct {
+	DisplayName        *string `json:"display_name"`
+	Note               *string `json:"note"`
+	ManualPlan         *string `json:"manual_plan"`
+	ManualRegisteredAt *string `json:"manual_registered_at"`
+	ManualLocked       *bool   `json:"manual_locked"`
+	Timezone           *string `json:"timezone"`
+	Language           *string `json:"language"`
+}
+
 type Profile struct {
-	Name          string      `json:"name"`
-	Note          string      `json:"note,omitempty"`
-	ExpectedIP    string      `json:"expected_ip,omitempty"`
-	Timezone      string      `json:"timezone,omitempty"`
-	Language      string      `json:"language,omitempty"`
-	Fingerprint   Fingerprint `json:"fingerprint"`
-	CreatedAt     time.Time   `json:"created_at"`
-	UpdatedAt     time.Time   `json:"updated_at"`
-	Dir           string      `json:"dir"`
-	CLIConfigDir  string      `json:"cli_config_dir"`
-	DesktopDir    string      `json:"desktop_data_dir"`
-	BrowserDir    string      `json:"browser_profile_dir"`
-	Active        bool        `json:"active"`
-	HasCLICreds   bool        `json:"has_cli_creds"`
-	HasDesktopDat bool        `json:"has_desktop_data"`
+	Name               string          `json:"name"`
+	DisplayName        string          `json:"display_name,omitempty"`
+	Note               string          `json:"note,omitempty"`
+	ExpectedIP         string          `json:"expected_ip,omitempty"`
+	Timezone           string          `json:"timezone,omitempty"`
+	Language           string          `json:"language,omitempty"`
+	ManualPlan         string          `json:"manual_plan,omitempty"`
+	ManualRegisteredAt string          `json:"manual_registered_at,omitempty"`
+	ManualLocked       bool            `json:"manual_locked,omitempty"`
+	Fingerprint        Fingerprint     `json:"fingerprint"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	LastUsedAt         *time.Time      `json:"last_used_at,omitempty"`
+	Dir                string          `json:"dir"`
+	CLIConfigDir       string          `json:"cli_config_dir"`
+	DesktopDir         string          `json:"desktop_data_dir"`
+	BrowserDir         string          `json:"browser_profile_dir"`
+	Active             bool            `json:"active"`
+	HasCLICreds        bool            `json:"has_cli_creds"`
+	HasDesktopDat      bool            `json:"has_desktop_data"`
+	HasDesktopAuth     bool            `json:"has_desktop_auth"`
+	Account            AccountIdentity `json:"account"`
 }
 
 type RulesStatus struct {
@@ -223,9 +258,91 @@ func Load(cfg *config.Config, name string) (*Profile, error) {
 	}
 	p.HasCLICreds = fileExists(filepath.Join(p.CLIConfigDir, ".credentials.json")) ||
 		hasClaudeJSONAccount(filepath.Join(p.CLIConfigDir, ".claude.json"))
+	if !p.HasCLICreds {
+		if tok, _ := LookupOAuthAccessToken(p.CLIConfigDir); tok != "" {
+			p.HasCLICreds = true
+		}
+	}
 	p.HasDesktopDat = fileExists(filepath.Join(p.DesktopDir, "Cookies")) ||
 		fileExists(filepath.Join(p.DesktopDir, "Local State"))
+	p.HasDesktopAuth = hasDesktopLoggedIn(p.DesktopDir)
+	p.Account = readAccountIdentity(&p)
+	if strings.TrimSpace(p.DisplayName) == "" {
+		switch {
+		case p.Account.DisplayName != "":
+			p.DisplayName = p.Account.DisplayName
+		case p.Account.Email != "":
+			p.DisplayName = p.Account.Email
+		default:
+			p.DisplayName = p.Name
+		}
+	}
 	return &p, nil
+}
+
+// UpdateMeta updates editable user metadata (display name, note, manual plan/registration date, timezone, language).
+func UpdateMeta(cfg *config.Config, name string, patch MetaPatch) (*Profile, error) {
+	if _, err := Ensure(cfg, name, ""); err != nil {
+		return nil, err
+	}
+	raw, err := os.ReadFile(MetaPath(name))
+	if err != nil {
+		return nil, err
+	}
+	var p Profile
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	if patch.DisplayName != nil {
+		p.DisplayName = strings.TrimSpace(*patch.DisplayName)
+	}
+	if patch.Note != nil {
+		p.Note = strings.TrimSpace(*patch.Note)
+	}
+	if patch.ManualPlan != nil {
+		p.ManualPlan = strings.TrimSpace(*patch.ManualPlan)
+	}
+	if patch.ManualRegisteredAt != nil {
+		val := strings.TrimSpace(*patch.ManualRegisteredAt)
+		if val != "" {
+			if _, parseErr := parseFlexibleDate(val); parseErr != nil {
+				return nil, fmt.Errorf("注册日期格式错误 %q，请使用 YYYY-MM-DD", val)
+			}
+		}
+		p.ManualRegisteredAt = val
+	}
+	if patch.ManualLocked != nil {
+		p.ManualLocked = *patch.ManualLocked
+	}
+	if patch.Timezone != nil {
+		p.Timezone = strings.TrimSpace(*patch.Timezone)
+	}
+	if patch.Language != nil {
+		p.Language = strings.TrimSpace(*patch.Language)
+	}
+	p.UpdatedAt = time.Now().UTC()
+	if err := writeProfileMeta(&p); err != nil {
+		return nil, err
+	}
+	return Load(cfg, name)
+}
+
+// TouchLastUsed records the most recent launch timestamp on a profile.
+func TouchLastUsed(name string) {
+	if ValidateName(name) != nil {
+		return
+	}
+	raw, err := os.ReadFile(MetaPath(name))
+	if err != nil {
+		return
+	}
+	var p Profile
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	p.LastUsedAt = &now
+	_ = writeProfileMeta(&p)
 }
 
 func List(cfg *config.Config) ([]Profile, error) {
@@ -589,6 +706,37 @@ func hasClaudeJSONAccount(p string) bool {
 		return false
 	}
 	return m["oauthAccount"] != nil || m["claudeAiOauth"] != nil
+}
+
+// hasDesktopLoggedIn distinguishes an initialized-but-signed-out Electron desktop-data directory
+// from a profile where Claude Desktop actually completed OAuth authentication.
+func hasDesktopLoggedIn(desktopDir string) bool {
+	raw, err := os.ReadFile(filepath.Join(desktopDir, "config.json"))
+	if err != nil || len(raw) == 0 {
+		return false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return false
+	}
+	if v, _ := m["oauth:tokenCache"].(string); v != "" {
+		return true
+	}
+	if v, _ := m["oauth:tokenCacheV2"].(string); v != "" {
+		return true
+	}
+	if v, _ := m["lastKnownAccountUuid"].(string); strings.TrimSpace(v) != "" {
+		return true
+	}
+	if b, _ := m["windowSizeWasSignedIn"].(bool); b {
+		return true
+	}
+	if side, ok := m["bootSideSessions"].(map[string]any); ok {
+		if uuid, _ := side["accountUuid"].(string); strings.TrimSpace(uuid) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func copyFile(src, dst string) error {

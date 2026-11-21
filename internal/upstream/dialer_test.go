@@ -231,4 +231,49 @@ func TestHTTPConnectDialerAuth(t *testing.T) {
 	if string(buf) != "ping" {
 		t.Fatalf("got %q", buf)
 	}
+
+	// Negative test: CRLF injection in HTTP CONNECT target MUST be rejected.
+	if _, err := d.DialContext(context.Background(), "tcp", "claude.ai:443\r\nX-Inject: 1"); err == nil {
+		t.Fatal("expected CRLF target in HTTP CONNECT to be rejected")
+	}
+
+	// WarmPool test: verifies pre-warmed connections populate & DrainPool closes them cleanly.
+	dPool := &Dialer{
+		Mode:        "direct-http",
+		Address:     ln.Addr().String(),
+		Username:    "u1",
+		Password:    "p1-secret",
+		Timeout:     3 * time.Second,
+		MaxWarmIdle: 2,
+	}
+	dPool.WarmPool(context.Background(), 2)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		dPool.poolMu.Lock()
+		n := len(dPool.warmPool)
+		dPool.poolMu.Unlock()
+		if n >= 2 {
+			break
+		}
+		time.Sleep(15 * time.Millisecond)
+	}
+	dPool.poolMu.Lock()
+	warmed := len(dPool.warmPool)
+	dPool.poolMu.Unlock()
+	if warmed == 0 {
+		t.Fatalf("expected WarmPool to pre-warm idle connections, got %d", warmed)
+	}
+	// Dial using warm pool then drain pool safely.
+	conn2, err := dPool.DialContext(context.Background(), "tcp", "claude.ai:443")
+	if err != nil {
+		t.Fatalf("pooled http connect failed: %v", err)
+	}
+	_ = conn2.Close()
+	dPool.DrainPool()
+	dPool.poolMu.Lock()
+	afterDrain := len(dPool.warmPool)
+	dPool.poolMu.Unlock()
+	if afterDrain != 0 {
+		t.Fatalf("expected 0 warm connections after DrainPool, got %d", afterDrain)
+	}
 }

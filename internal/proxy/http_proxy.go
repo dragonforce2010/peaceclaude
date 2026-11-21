@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"peaceclaude/internal/audit"
@@ -21,13 +22,14 @@ import (
 )
 
 type Gateway struct {
-	mu       sync.RWMutex
-	cfg      *config.Config
-	policy   *policy.Engine
-	gate     *egress.Gate
-	audit    *audit.Store
-	dialer   *upstream.Dialer
-	allowed  []netip.Prefix
+	mu           sync.RWMutex
+	cfg          *config.Config
+	policy       *policy.Engine
+	gate         *egress.Gate
+	audit        *audit.Store
+	dialer       *upstream.Dialer
+	backupDialer *upstream.Dialer
+	allowed      []netip.Prefix
 
 	connMu         sync.Mutex
 	protectedConns map[net.Conn]struct{}
@@ -40,6 +42,7 @@ func NewGateway(cfg *config.Config, eng *policy.Engine, gate *egress.Gate, store
 		gate:           gate,
 		audit:          store,
 		dialer:         upstream.FromConfig(cfg.Upstream),
+		backupDialer:   upstream.BackupFromConfig(cfg.Upstream),
 		protectedConns: make(map[net.Conn]struct{}),
 	}
 	gw.rebuildAllowedSubnetsLocked(cfg)
@@ -48,11 +51,27 @@ func NewGateway(cfg *config.Config, eng *policy.Engine, gate *egress.Gate, store
 
 func (g *Gateway) UpdateConfig(cfg *config.Config) {
 	g.mu.Lock()
-	defer g.mu.Unlock()
+	oldDialer := g.dialer
+	oldBackup := g.backupDialer
 	g.cfg = cfg
 	g.policy.UpdateConfig(cfg)
 	g.dialer = upstream.FromConfig(cfg.Upstream)
+	g.backupDialer = upstream.BackupFromConfig(cfg.Upstream)
 	g.rebuildAllowedSubnetsLocked(cfg)
+	g.mu.Unlock()
+
+	oldDialer.DrainPool()
+	oldBackup.DrainPool()
+}
+
+// WarmUpstream pre-warms TCP connections to the active remote upstream proxy.
+func (g *Gateway) WarmUpstream(ctx context.Context) {
+	g.mu.RLock()
+	d := g.dialer
+	g.mu.RUnlock()
+	if d != nil {
+		d.WarmPool(ctx, 2)
+	}
 }
 
 func (g *Gateway) rebuildAllowedSubnetsLocked(cfg *config.Config) {
@@ -70,16 +89,28 @@ func (g *Gateway) rebuildAllowedSubnetsLocked(cfg *config.Config) {
 	g.allowed = prefixes
 }
 
-func (g *Gateway) ClientAllowed(remoteAddr string) bool {
+func parseRemoteAddr(remoteAddr string) (netip.Addr, bool) {
 	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
 		host = remoteAddr
 	}
 	addr, err := netip.ParseAddr(strings.Trim(host, "[]"))
 	if err != nil {
+		return netip.Addr{}, false
+	}
+	return addr.Unmap().WithZone(""), true
+}
+
+func (g *Gateway) isLoopbackClient(remoteAddr string) bool {
+	addr, ok := parseRemoteAddr(remoteAddr)
+	return ok && addr.IsLoopback()
+}
+
+func (g *Gateway) ClientAllowed(remoteAddr string) bool {
+	addr, ok := parseRemoteAddr(remoteAddr)
+	if !ok {
 		return false
 	}
-	addr = addr.Unmap().WithZone("")
 	g.mu.RLock()
 	defer g.mu.RUnlock()
 	for _, p := range g.allowed {
@@ -102,8 +133,16 @@ func (g *Gateway) untrackProtected(c net.Conn) {
 	g.connMu.Unlock()
 }
 
-// CloseProtectedConns immediately terminates all active proxied connections (fail-closed cut).
+// CloseProtectedConns immediately terminates all active proxied connections (fail-closed cut)
+// and drains pre-warmed upstream sockets.
 func (g *Gateway) CloseProtectedConns() int {
+	g.mu.RLock()
+	d := g.dialer
+	bd := g.backupDialer
+	g.mu.RUnlock()
+	d.DrainPool()
+	bd.DrainPool()
+
 	g.connMu.Lock()
 	conns := make([]net.Conn, 0, len(g.protectedConns))
 	for c := range g.protectedConns {
@@ -118,6 +157,128 @@ func (g *Gateway) CloseProtectedConns() int {
 	return len(conns)
 }
 
+type trackedConn struct {
+	net.Conn
+	gw   *Gateway
+	once sync.Once
+}
+
+func (t *trackedConn) Close() error {
+	t.once.Do(func() {
+		t.gw.untrackProtected(t)
+	})
+	return t.Conn.Close()
+}
+
+var copyBufPool = sync.Pool{
+	New: func() any {
+		buf := make([]byte, 64*1024)
+		return &buf
+	},
+}
+
+func isTransientDialError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"eof",
+		"connection reset",
+		"broken pipe",
+		"i/o timeout",
+		"timeout",
+		"connection refused",
+		"network is unreachable",
+		"socks5",
+		"connect response",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func dialWithRetry(ctx context.Context, primary, backup *upstream.Dialer, targetAddr string) (net.Conn, error) {
+	if primary == nil {
+		return nil, errors.New("upstream dialer is nil")
+	}
+
+	remaining := 15 * time.Second
+	if dl, ok := ctx.Deadline(); ok {
+		if r := time.Until(dl); r > 0 {
+			remaining = r
+		}
+	}
+
+	firstBudget := remaining
+	if remaining > 6*time.Second {
+		// Fail fast on cross-ocean TCP SYN packet loss instead of burning the full 12s+ budget.
+		firstBudget = 4500 * time.Millisecond
+	} else if backup != nil && remaining > 2*time.Second {
+		firstBudget = remaining / 2
+	}
+	firstCtx, firstCancel := context.WithTimeout(ctx, firstBudget)
+	conn, err := primary.DialContext(firstCtx, "tcp", targetAddr)
+	firstCancel()
+	if err == nil {
+		return conn, nil
+	}
+
+	firstErr := err
+	if ctx.Err() == nil && isTransientDialError(err) {
+		timer := time.NewTimer(150 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, firstErr
+		case <-timer.C:
+		}
+		retryCtx := ctx
+		var retryCancel context.CancelFunc
+		if backup != nil {
+			rem := 10 * time.Second
+			if dl, ok := ctx.Deadline(); ok {
+				rem = time.Until(dl)
+			}
+			// Always reserve >=3.5s for backup failover when available.
+			if rem > 4500*time.Millisecond {
+				retryBudget := rem / 2
+				if rem-retryBudget < 3500*time.Millisecond {
+					retryBudget = rem - 3500*time.Millisecond
+				}
+				if retryBudget > 4500*time.Millisecond {
+					retryBudget = 4500 * time.Millisecond
+				}
+				if retryBudget >= 500*time.Millisecond {
+					retryCtx, retryCancel = context.WithTimeout(ctx, retryBudget)
+				}
+			}
+		}
+		retryConn, retryErr := primary.DialContext(retryCtx, "tcp", targetAddr)
+		if retryCancel != nil {
+			retryCancel()
+		}
+		if retryErr == nil {
+			return retryConn, nil
+		}
+		firstErr = retryErr
+	}
+	if backup != nil && ctx.Err() == nil {
+		if backupConn, backupErr := backup.DialContext(ctx, "tcp", targetAddr); backupErr == nil {
+			return backupConn, nil
+		} else {
+			return nil, fmt.Errorf("primary failed (%v); backup failed (%v)", firstErr, backupErr)
+		}
+	}
+	return nil, firstErr
+}
+
 func (g *Gateway) dialTarget(ctx context.Context, dec policy.Decision, targetAddr string) (net.Conn, error) {
 	switch dec.Action {
 	case policy.ActionDirectLocal, policy.ActionDirectCorporate:
@@ -126,8 +287,9 @@ func (g *Gateway) dialTarget(ctx context.Context, dec policy.Decision, targetAdd
 	case policy.ActionProxy:
 		g.mu.RLock()
 		dialer := g.dialer
+		backup := g.backupDialer
 		g.mu.RUnlock()
-		return dialer.DialContext(ctx, "tcp", targetAddr)
+		return dialWithRetry(ctx, dialer, backup, targetAddr)
 	default:
 		return nil, fmt.Errorf("blocked by policy (%s): %s", dec.Action, dec.Reason)
 	}
@@ -192,14 +354,32 @@ func (g *Gateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.handlePlainHTTP(w, r)
 }
 
+func (g *Gateway) evaluateForClient(remoteAddr, target string) policy.Decision {
+	gateOpen, gateReason := g.gate.AllowTraffic()
+	dec := g.policy.Evaluate(target, gateOpen, gateReason)
+	if dec.Category == policy.CategoryLoopback && !g.isLoopbackClient(remoteAddr) {
+		dec.Action = policy.ActionBlockPrivate
+		dec.Reason = "blocked non-loopback client access to host loopback target"
+	}
+	return dec
+}
+
+func (g *Gateway) recheckProxyAllowed(target string) (bool, policy.Decision) {
+	gateOpen, gateReason := g.gate.AllowTraffic()
+	dec := g.policy.Evaluate(target, gateOpen, gateReason)
+	if dec.Action != policy.ActionProxy {
+		return false, dec
+	}
+	return true, dec
+}
+
 func (g *Gateway) handleConnect(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	target := r.Host
 	if _, _, err := net.SplitHostPort(target); err != nil {
 		target = net.JoinHostPort(target, "443")
 	}
-	gateOpen, gateReason := g.gate.AllowTraffic()
-	dec := g.policy.Evaluate(target, gateOpen, gateReason)
+	dec := g.evaluateForClient(r.RemoteAddr, target)
 	g.recordDecision(dec)
 	egressIP := g.gate.Snapshot().LastGood.EgressIP
 
@@ -250,6 +430,16 @@ func (g *Gateway) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer upConn.Close()
 
+	// Secondary fail-closed TOCTOU check before admitting the established tunnel.
+	if dec.Action == policy.ActionProxy {
+		if allowed, postDec := g.recheckProxyAllowed(target); !allowed {
+			g.recordDecision(postDec)
+			w.Header().Set("X-PeaceClaude-Block", string(postDec.Action))
+			http.Error(w, fmt.Sprintf("peaceclaude blocked %s after dial (fail-closed): %s", target, postDec.Reason), http.StatusServiceUnavailable)
+			return
+		}
+	}
+
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "hijacking not supported", http.StatusInternalServerError)
@@ -261,13 +451,14 @@ func (g *Gateway) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	_, _ = io.WriteString(clientConn, "HTTP/1.1 200 Connection Established\r\nProxy-Agent: peaceclaude\r\n\r\n")
-
 	if dec.Action == policy.ActionProxy {
 		g.trackProtected(upConn)
 		g.trackProtected(clientConn)
 		defer g.untrackProtected(upConn)
 		defer g.untrackProtected(clientConn)
+	}
+	if _, err := io.WriteString(clientConn, "HTTP/1.1 200 Connection Established\r\nProxy-Agent: peaceclaude\r\n\r\n"); err != nil {
+		return
 	}
 	if dec.IsClaudeStream {
 		g.gate.BeginStream()
@@ -316,8 +507,7 @@ func (g *Gateway) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	gateOpen, gateReason := g.gate.AllowTraffic()
-	dec := g.policy.Evaluate(target, gateOpen, gateReason)
+	dec := g.evaluateForClient(r.RemoteAddr, target)
 	g.recordDecision(dec)
 	egressIP := g.gate.Snapshot().LastGood.EgressIP
 
@@ -356,10 +546,38 @@ func (g *Gateway) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	removeHopByHop(outReq.Header)
 
+	var dialMu sync.Mutex
+	var spawned []*trackedConn
+	defer func() {
+		dialMu.Lock()
+		list := spawned
+		dialMu.Unlock()
+		for _, tc := range list {
+			_ = tc.Close()
+		}
+	}()
+
 	tr := &http.Transport{
 		Proxy: nil,
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return g.dialTarget(ctx, dec, addr)
+			upConn, err := g.dialTarget(ctx, dec, addr)
+			if err != nil {
+				return nil, err
+			}
+			if dec.Action == policy.ActionProxy {
+				if allowed, postDec := g.recheckProxyAllowed(addr); !allowed {
+					_ = upConn.Close()
+					g.recordDecision(postDec)
+					return nil, fmt.Errorf("fail-closed after dial: %s", postDec.Reason)
+				}
+				tc := &trackedConn{Conn: upConn, gw: g}
+				g.trackProtected(tc)
+				dialMu.Lock()
+				spawned = append(spawned, tc)
+				dialMu.Unlock()
+				return tc, nil
+			}
+			return upConn, nil
 		},
 		DisableKeepAlives: true,
 	}
@@ -408,21 +626,66 @@ func (g *Gateway) handlePlainHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func tunnelBidirectional(clientConn net.Conn, clientReader io.Reader, upConn net.Conn) (bytesOut, bytesIn int64) {
+	var clientDone atomic.Bool
+	var bytesInAtomic atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		bytesOut, _ = io.Copy(upConn, clientReader)
+		bufPtr := copyBufPool.Get().(*[]byte)
+		var copyErr error
+		bytesOut, copyErr = io.CopyBuffer(upConn, clientReader, *bufPtr)
+		copyBufPool.Put(bufPtr)
+		clientDone.Store(true)
 		if tc, ok := upConn.(*net.TCPConn); ok {
 			_ = tc.CloseWrite()
+		}
+		if copyErr != nil {
+			// Client reset abnormally: release upstream read waiter promptly.
+			_ = upConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		} else if bytesInAtomic.Load() == 0 {
+			// Client half-closed/aborted before upstream sent any byte (e.g., hung TLS handshake):
+			// wait up to 8s instead of lingering 60s and leaking stream gauges.
+			_ = upConn.SetReadDeadline(time.Now().Add(8 * time.Second))
+		} else {
+			_ = upConn.SetReadDeadline(time.Now().Add(20 * time.Second))
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		bytesIn, _ = io.Copy(clientConn, upConn)
+		bufPtr := copyBufPool.Get().(*[]byte)
+		buf := *bufPtr
+		defer copyBufPool.Put(bufPtr)
+		var totalIn int64
+		for {
+			if clientDone.Load() {
+				if bytesInAtomic.Load() == 0 {
+					_ = upConn.SetReadDeadline(time.Now().Add(8 * time.Second))
+				} else {
+					_ = upConn.SetReadDeadline(time.Now().Add(20 * time.Second))
+				}
+			}
+			nr, rErr := upConn.Read(buf)
+			if nr > 0 {
+				nw, wErr := clientConn.Write(buf[:nr])
+				if nw > 0 {
+					totalIn += int64(nw)
+					bytesInAtomic.Add(int64(nw))
+				}
+				if wErr != nil || nw != nr {
+					break
+				}
+			}
+			if rErr != nil {
+				break
+			}
+		}
+		bytesIn = totalIn
 		if tc, ok := clientConn.(*net.TCPConn); ok {
 			_ = tc.CloseWrite()
 		}
+		// Upstream response stream completed: bound client half-open linger so SSE/stream counters don't leak.
+		_ = clientConn.SetReadDeadline(time.Now().Add(3 * time.Second))
 	}()
 	wg.Wait()
 	return bytesOut, bytesIn
@@ -507,6 +770,10 @@ func (g *Gateway) handleSOCKS5Conn(conn net.Conn) {
 			return
 		}
 		host = string(b)
+		if host == "" || strings.ContainsAny(host, "\r\n\t \x00") {
+			_, _ = conn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			return
+		}
 	case 0x04:
 		var b [16]byte
 		if _, err := io.ReadFull(conn, b[:]); err != nil {
@@ -525,8 +792,7 @@ func (g *Gateway) handleSOCKS5Conn(conn net.Conn) {
 	port := binary.BigEndian.Uint16(portBuf[:])
 	target := net.JoinHostPort(host, fmt.Sprintf("%d", port))
 
-	gateOpen, gateReason := g.gate.AllowTraffic()
-	dec := g.policy.Evaluate(target, gateOpen, gateReason)
+	dec := g.evaluateForClient(conn.RemoteAddr().String(), target)
 	g.recordDecision(dec)
 	egressIP := g.gate.Snapshot().LastGood.EgressIP
 
@@ -568,14 +834,22 @@ func (g *Gateway) handleSOCKS5Conn(conn net.Conn) {
 	}
 	defer upConn.Close()
 
-	_ = conn.SetDeadline(time.Time{})
-	_, _ = conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 0})
-
+	// Secondary fail-closed TOCTOU check before acknowledging SOCKS5 tunnel.
 	if dec.Action == policy.ActionProxy {
+		if allowed, postDec := g.recheckProxyAllowed(target); !allowed {
+			g.recordDecision(postDec)
+			_, _ = conn.Write([]byte{0x05, 0x02, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
+			return
+		}
 		g.trackProtected(upConn)
 		g.trackProtected(conn)
 		defer g.untrackProtected(upConn)
 		defer g.untrackProtected(conn)
+	}
+
+	_ = conn.SetDeadline(time.Time{})
+	if _, err := conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 0}); err != nil {
+		return
 	}
 	if dec.IsClaudeStream {
 		g.gate.BeginStream()

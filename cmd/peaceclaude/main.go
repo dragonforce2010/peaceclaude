@@ -379,8 +379,8 @@ func cmdUI(args []string) error {
 			return err
 		}
 	}
-	u := cfg.ControlURL()
-	fmt.Printf("PeaceClaude Web 控制台: %s\n", u)
+	u := cfg.ControlURL() + "/#accounts"
+	fmt.Printf("PeaceClaude 多账号安心工作台: %s\n", u)
 	if !*noOpen {
 		_ = exec.Command("open", u).Start()
 	}
@@ -872,8 +872,16 @@ func cmdProfile(args []string) error {
 			if p.Active {
 				mark = "*"
 			}
-			fmt.Printf("%s %-16s UUID=%s CLI=%t Desktop=%t %s\n",
-				mark, p.Name, p.Fingerprint.DeviceUUID, p.HasCLICreds, p.HasDesktopDat, p.Note)
+			age := p.Account.AccountAgeText
+			if age == "" {
+				age = "未记录"
+			}
+			email := p.Account.Email
+			if email == "" {
+				email = "-"
+			}
+			fmt.Printf("%s %-14s 套餐=%-8s 注册=%-12s 邮箱=%-28s CLI=%t Desktop=%t %s\n",
+				mark, p.Name, p.Account.PlanLabel, age, email, p.HasCLICreds, p.HasDesktopDat, p.Note)
 		}
 		return nil
 	case "create", "bind", "add":

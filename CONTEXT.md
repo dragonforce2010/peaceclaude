@@ -6,7 +6,14 @@
 它融合了：
 - **ReClaude (`recode.cat`)** 的轻量单二进制体验：统一托管 CLI 与 Desktop、共用本地代理守护进程、原生 macOS `.app` 启动器、直通域名泄漏审计（`leaks`）、脱敏本地抓包（`capture`）、多账号 Profile 隔离、全局规则共享（`rules`）、macOS Cowork `vm-proxy` 与医生自检（`doctor`）。
 - **Claude-Cage (`Lee-xeo/Claude-Cage`)** 的核心防风控安全理念：Fail-Closed 永不直连回退、多源出口 IP 强验证、时区/语言随出口 IP 自动同步、环境与指纹体检（含 FuckClaude 浏览器侧检查项）、多环境隔离与可恢复指纹清理、现代化可视化控制台。
-- **本机实战防御沉淀**：兼容 Webshare 静态 IP（SOCKS5 远端解析，规避 `platform.claude.com` HTTP CONNECT RST）、兼容 Clash Verge 新旧 Unix Socket、绝不开启 TUN（避免与企业飞连冲突）、SSE 活跃长流探测避让、macOS `pf` 防直连 Kill-Switch、403/断流三分类分诊。
+- **macOS 原生界面入口 (`/Applications/PeaceClaude.app`)**: 双击打开基于 Swift + WKWebView 的原生管理窗口（`http://127.0.0.1:18899/#accounts`），严格按 **Unslop** (`@heydamir`, CC-BY-4.0) 极简精密仪器规范为 PeaceClaude 原创设计，采用单一分组固定侧栏、单行顶部遥测轨与非对称工作流：
+  - **多账号中心**：顶部默认账号宽幅焦点仪表卡 + 下方列对齐待命账号清单（准确区分 `已激活` vs `未登录` 与独立 `Desktop PID`，内置单活防 `claude://` 串号切换及「未启用浏览器 PAC 一键防 403」提醒）；
+  - **7:5 外观工坊**：左侧实时微缩 PeaceClaude 仪表画布（实时预览亮/暗、三态安全语义条与终端等宽字体）+ 右侧原创色板矩阵（`paper`/`linen`/`frost`/`stone`/`chalk` 与 `obsidian`/`midnight`/`slate`/`amber`/`moss`，向后兼容历史预设别名）与快照标签；
+  - **7:5 远程配对台**：左侧三节点连接拓扑与授权设备管理 + 右侧四角定位配对通行证（纯 Go ISO-18004 SVG 二维码 + 120s 实时倒计时进度条，驱动限权 `/mobile` 控制台）；
+  - **左下角一体式身份控制托盘**：呼出带内联浅/深/跟随速切与 2×2 快捷入口的控制面板，支持 `⌘L` 锁定控制台（代理持续守护不中断）。
+- **网络韧性与 PAC/Policy 单一源**：`egress` 探针采用多源并行竞速 + 瞬态超时 1 次宽容/快速复检（IP/国家违规仍 0 容忍秒锁）；`upstream` / `proxy` 开启 `TCP_NODELAY`、瞬断重试与主备无缝切换、`tunnelBidirectional` 半关闭防泄漏；`pac.go` 与 `policy.go` 共享完整 Google OAuth 资源域（含 `gstatic.com`/`googleapis.com`/`googleusercontent.com`），并保持 `www.google.com` 走 `DIRECT`。
+- **本机存储与防关联边界**: 账号数据与隔离环境均存于 `~/.peaceclaude/` 下的 `0700`/`0600` 目录与 JSON 文件（非 SQLite），可消除本机文件/Cookie/DeviceUUID 串号，但不能替代多 IP（多号共享同一静态 IP 或相同硬件指纹仍存在服务端关联风险）。
+- **官方个人版 (`1p`) 主端与三方模型边界**: 官方 `Claude.app` 个人版聊天使用私有 Web 会话协议，不支持在保持 `1p` 原生交互体验的同时挂接三方模型 API；三方模型应仅在宿主机独立 CLI 通道使用，绝不强行破解桌面主端。
 
 ## Domain Glossary (Canonical Terms)
 - **Egress Gate (出口门禁)**: `peaceclaude` 守护网关内置的 Fail-Closed 状态机。未验证或出口 IP 偏离预期时处于 `LOCKED`，拒绝一切 Claude/Anthropic 流量，永不回退 DIRECT。_Avoid_: `fallback`、`auto-direct`。

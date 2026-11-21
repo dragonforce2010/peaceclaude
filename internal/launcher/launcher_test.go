@@ -119,3 +119,24 @@ func TestBuildDesktopSpecNeverUsesForbiddenClaudeSwitches(t *testing.T) {
 		}
 	}
 }
+
+func TestEmbeddedMacOSSwiftSourceValid(t *testing.T) {
+	for _, sym := range []string{"WKWebView", "NSApplicationDelegate", "runJavaScriptConfirmPanelWithMessage", "#accounts"} {
+		if !strings.Contains(macOSAppSwiftSrc, sym) {
+			t.Fatalf("embedded app_macos.swift missing %q", sym)
+		}
+	}
+}
+
+func TestExtractClaudeDeepLinkArgsAndUserDataDir(t *testing.T) {
+	raw := `/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/Users/alice/.peaceclaude/profiles/team-a/desktop-data --proxy-server=http://127.0.0.1:18897 --disable-quic "claude://claude.ai/login/app-google-auth?code=abc&state=xyz" claude://claude.ai/login/app-google-auth?code=abc&state=xyz`
+	links := ExtractClaudeDeepLinkArgs(raw)
+	if len(links) != 1 || links[0] != "claude://claude.ai/login/app-google-auth?code=abc&state=xyz" {
+		t.Fatalf("unexpected deep links: %v", links)
+	}
+	dir := ExtractUserDataDir(raw)
+	wantDir := "/Users/alice/.peaceclaude/profiles/team-a/desktop-data"
+	if dir != wantDir {
+		t.Fatalf("ExtractUserDataDir = %q, want %q", dir, wantDir)
+	}
+}

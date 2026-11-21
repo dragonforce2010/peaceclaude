@@ -289,11 +289,15 @@ func (g *Gate) Check(ctx context.Context, respectSSE bool) ProbeResult {
 		}
 	} else {
 		g.consecutiveFails++
-		// On proven IP/country mismatch, lock immediately.
-		// On transient timeout when already open, require 2 consecutive failures if streams are active,
-		// otherwise lock immediately for strict fail-closed protection.
-		mismatch := strings.Contains(res.FailureReason, "mismatch") || strings.Contains(res.FailureReason, "country")
-		if mismatch || !currentlyOpen || g.activeStreams.Load() == 0 || g.consecutiveFails >= 2 {
+		// Any proven IP, country, or non-public egress violation MUST lock immediately (0-tolerance).
+		// On pure transient network timeouts when the gate is already OPEN, require 2 consecutive failures
+		// so momentary residential/SOCKS5 jitter does not drop in-flight auth/SSE sessions; the probe loop
+		// automatically switches to BadIntervalSec whenever ConsecutiveFails > 0.
+		policyViolation := strings.Contains(res.FailureReason, "mismatch") ||
+			strings.Contains(res.FailureReason, "country") ||
+			strings.Contains(res.FailureReason, "non-public") ||
+			strings.Contains(res.FailureReason, "invalid egress IP")
+		if policyViolation || !g.open || g.consecutiveFails >= 2 {
 			g.open = false
 			g.lockReason = res.FailureReason
 		}
@@ -325,19 +329,74 @@ func ValidateEgressPolicy(cfg *config.Config, res ProbeResult) string {
 	if expected != "" && res.EgressIP != expected {
 		return fmt.Sprintf("egress IP mismatch: actual=%s expected=%s", res.EgressIP, expected)
 	}
-	if len(cfg.Egress.AllowedCountries) > 0 && res.Country != "" {
-		matched := false
-		for _, cc := range cfg.Egress.AllowedCountries {
-			if strings.EqualFold(strings.TrimSpace(cc), strings.TrimSpace(res.Country)) {
-				matched = true
-				break
+	if len(cfg.Egress.AllowedCountries) > 0 {
+		country := strings.TrimSpace(res.Country)
+		if country == "" {
+			if expected == "" {
+				return fmt.Sprintf("egress country unknown while allowed_countries policy %v is active", cfg.Egress.AllowedCountries)
 			}
-		}
-		if !matched {
-			return fmt.Sprintf("egress country %q not in allowed list %v", res.Country, cfg.Egress.AllowedCountries)
+		} else {
+			matched := false
+			for _, cc := range cfg.Egress.AllowedCountries {
+				if strings.EqualFold(strings.TrimSpace(cc), country) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return fmt.Sprintf("egress country %q not in allowed list %v", res.Country, cfg.Egress.AllowedCountries)
+			}
 		}
 	}
 	return ""
+}
+
+type probeSource struct {
+	name string
+	url  string
+	kind string
+}
+
+func probeSourcesParallel(ctx context.Context, client *http.Client, timeout time.Duration, sources []probeSource) ProbeResult {
+	type raceOutcome struct {
+		res ProbeResult
+		err string
+	}
+	raceCtx, raceCancel := context.WithTimeout(ctx, timeout)
+	defer raceCancel()
+	ch := make(chan raceOutcome, len(sources))
+	for _, src := range sources {
+		src := src
+		go func() {
+			start := time.Now()
+			ip, loc, colo, err := fetchEgressEndpoint(raceCtx, client, src.url, src.kind)
+			if err == nil && ip != "" {
+				ch <- raceOutcome{res: ProbeResult{
+					OK:        true,
+					EgressIP:  ip,
+					Country:   loc,
+					Colo:      colo,
+					Source:    src.name,
+					LatencyMs: time.Since(start).Milliseconds(),
+				}}
+				return
+			}
+			ch <- raceOutcome{err: fmt.Sprintf("%s: %v", src.name, err)}
+		}()
+	}
+
+	var errs []string
+	for range sources {
+		out := <-ch
+		if out.res.OK {
+			raceCancel()
+			return out.res
+		}
+		errs = append(errs, out.err)
+	}
+	return ProbeResult{
+		FailureReason: "upstream probe failed: " + strings.Join(errs, "; "),
+	}
 }
 
 func (g *Gate) defaultProbe(ctx context.Context, cfg *config.Config) ProbeResult {
@@ -347,55 +406,72 @@ func (g *Gate) defaultProbe(ctx context.Context, cfg *config.Config) ProbeResult
 		return res
 	}
 	timeout := time.Duration(cfg.Egress.ProbeTimeoutSec) * time.Second
-	if timeout < 10*time.Second {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	} else if timeout > 12*time.Second {
 		timeout = 12 * time.Second
 	}
 	dialer := upstream.FromConfig(cfg.Upstream)
 	client := dialer.NewHTTPClient(timeout)
 
-	type probeSource struct {
-		name string
-		url  string
-		kind string
-	}
-	var sources []probeSource
 	if cfg.Upstream.Mode == "local-proxy" {
 		// In rule-based local-proxy mode (e.g. Clash Verge), only probe Claude's own domain
-		// (with one retry) so non-Claude fallback URLs never produce false Split-IP mismatches.
-		sources = []probeSource{
+		// (with one bounded retry) so non-Claude fallback URLs never produce false Split-IP mismatches.
+		perAttempt := timeout
+		if perAttempt > 7*time.Second {
+			perAttempt = 7 * time.Second
+		}
+		sources := []probeSource{
 			{"claude.ai/trace", "https://claude.ai/cdn-cgi/trace", "trace"},
 			{"claude.ai/trace(retry)", "https://claude.ai/cdn-cgi/trace", "trace"},
 		}
+		var lastErr string
+		for i, src := range sources {
+			if i > 0 {
+				t := time.NewTimer(250 * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+				case <-t.C:
+				}
+			}
+			start := time.Now()
+			sCtx, sCancel := context.WithTimeout(ctx, perAttempt)
+			ip, loc, colo, err := fetchEgressEndpoint(sCtx, client, src.url, src.kind)
+			sCancel()
+			if err == nil && ip != "" {
+				res.OK = true
+				res.EgressIP = ip
+				res.Country = loc
+				res.Colo = colo
+				res.Source = src.name
+				res.LatencyMs = time.Since(start).Milliseconds()
+				break
+			}
+			lastErr = fmt.Sprintf("%s: %v", src.name, err)
+		}
+		if !res.OK {
+			res.FailureReason = "upstream probe failed: " + lastErr
+			return res
+		}
 	} else {
-		sources = []probeSource{
+		sources := []probeSource{
 			{"claude.ai/trace", "https://claude.ai/cdn-cgi/trace", "trace"},
 			{"1.1.1.1/trace", "https://1.1.1.1/cdn-cgi/trace", "trace"},
 			{"icanhazip", "https://ipv4.icanhazip.com/", "plain"},
 			{"ipify", "https://api.ipify.org/", "plain"},
 		}
-	}
-
-	var lastErr string
-	for _, src := range sources {
-		start := time.Now()
-		sCtx, sCancel := context.WithTimeout(ctx, timeout)
-		ip, loc, colo, err := fetchEgressEndpoint(sCtx, client, src.url, src.kind)
-		sCancel()
-		if err == nil && ip != "" {
-			res.OK = true
-			res.EgressIP = ip
-			res.Country = loc
-			res.Colo = colo
-			res.Source = src.name
-			res.LatencyMs = time.Since(start).Milliseconds()
-			break
+		raced := probeSourcesParallel(ctx, client, timeout, sources)
+		if !raced.OK {
+			res.FailureReason = raced.FailureReason
+			return res
 		}
-		lastErr = fmt.Sprintf("%s: %v", src.name, err)
-	}
-
-	if !res.OK {
-		res.FailureReason = "upstream probe failed: " + lastErr
-		return res
+		res.OK = true
+		res.EgressIP = raced.EgressIP
+		res.Country = raced.Country
+		res.Colo = raced.Colo
+		res.Source = raced.Source
+		res.LatencyMs = raced.LatencyMs
 	}
 
 	// Enrich GeoIP & Split-IP in parallel with tight timeouts so probes stay fast.
@@ -476,7 +552,11 @@ func fetchEgressEndpoint(ctx context.Context, client *http.Client, targetURL, ki
 			}
 		}
 	} else {
-		ip = strings.Fields(text)[0]
+		fields := strings.Fields(text)
+		if len(fields) == 0 {
+			return "", "", "", fmt.Errorf("empty response body")
+		}
+		ip = fields[0]
 	}
 	if _, parseErr := netip.ParseAddr(ip); parseErr != nil {
 		return "", "", "", fmt.Errorf("invalid IP in response: %q", ip)
@@ -543,8 +623,12 @@ func (g *Gate) lookupGeo(ctx context.Context, ip string) (GeoInfo, bool) {
 		g.geoCache = map[string]GeoInfo{}
 	}
 	g.geoCache[ip] = info
-	saveGeoCache(g.geoCache)
+	snapshot := make(map[string]GeoInfo, len(g.geoCache))
+	for k, v := range g.geoCache {
+		snapshot[k] = v
+	}
 	g.mu.Unlock()
+	saveGeoCache(snapshot)
 	return info, true
 }
 

@@ -37,14 +37,14 @@ func RenderPFAnchor(cfg *config.Config) string {
 	var sb strings.Builder
 	sb.WriteString("# PeaceClaude macOS pf killswitch & Cowork VM anti-leak anchor\n")
 	sb.WriteString("# Validate syntax: /sbin/pfctl -n -a peaceclaude -f <this-file>\n")
-	sb.WriteString(fmt.Sprintf("table <cage_anthropic_v4> persist { %s }\n", v4List))
+	sb.WriteString(fmt.Sprintf("table <peace_anthropic_v4> persist { %s }\n", v4List))
 
 	// Allow direct outbound ONLY to the configured upstream static proxy host:port (when direct mode).
 	if cfg != nil && cfg.Upstream.Address != "" {
 		if h, p, err := net.SplitHostPort(cfg.Upstream.Address); err == nil {
 			if ip := net.ParseIP(h); ip != nil && !ip.IsLoopback() {
-				sb.WriteString(fmt.Sprintf("table <cage_upstream_proxy> persist { %s }\n", h))
-				sb.WriteString(fmt.Sprintf("pass out quick proto tcp from any to <cage_upstream_proxy> port %s\n", p))
+				sb.WriteString(fmt.Sprintf("table <peace_upstream_proxy> persist { %s }\n", h))
+				sb.WriteString(fmt.Sprintf("pass out quick proto tcp from any to <peace_upstream_proxy> port %s\n", p))
 			}
 		}
 	}
@@ -53,16 +53,16 @@ func RenderPFAnchor(cfg *config.Config) string {
 	// and block VM subnet from sending direct traffic to Anthropic CIDRs or UDP/443 QUIC.
 	if cfg != nil && cfg.Listen.VMProxyEnabled && len(cfg.Listen.VMProxySubnets) > 0 {
 		subnets := strings.Join(cfg.Listen.VMProxySubnets, " ")
-		sb.WriteString(fmt.Sprintf("table <cage_cowork_vm> persist { %s }\n", subnets))
-		sb.WriteString(fmt.Sprintf("pass in quick proto tcp from <cage_cowork_vm> to any port { %d %d }\n",
+		sb.WriteString(fmt.Sprintf("table <peace_cowork_vm> persist { %s }\n", subnets))
+		sb.WriteString(fmt.Sprintf("pass in quick proto tcp from <peace_cowork_vm> to any port { %d %d }\n",
 			cfg.Listen.HTTPPort, cfg.Listen.SOCKS5Port))
-		sb.WriteString("block drop quick proto udp from <cage_cowork_vm> to any port 443\n")
-		sb.WriteString("block drop quick proto tcp from <cage_cowork_vm> to <cage_anthropic_v4>\n")
+		sb.WriteString("block drop quick proto udp from <peace_cowork_vm> to any port 443\n")
+		sb.WriteString("block drop quick proto tcp from <peace_cowork_vm> to <peace_anthropic_v4>\n")
 	}
 
 	// Host-wide fail-closed killswitch: drop any direct TCP/UDP/IPv6 to Anthropic CIDRs.
-	sb.WriteString("block drop out quick proto tcp from any to <cage_anthropic_v4>\n")
-	sb.WriteString("block drop out quick proto udp from any to <cage_anthropic_v4>\n")
+	sb.WriteString("block drop out quick proto tcp from any to <peace_anthropic_v4>\n")
+	sb.WriteString("block drop out quick proto udp from any to <peace_anthropic_v4>\n")
 	sb.WriteString(fmt.Sprintf("block drop out quick inet6 from any to %s\n", v6List))
 	return sb.String()
 }

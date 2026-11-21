@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"image"
 	"image/color"
@@ -21,6 +22,9 @@ import (
 	"peaceclaude/internal/host"
 	"peaceclaude/internal/profile"
 )
+
+//go:embed app_macos.swift
+var macOSAppSwiftSrc string
 
 // ForbiddenClaudeDesktopSwitches lists Chromium switches explicitly rejected by
 // official Claude Desktop v6+ startup security checks ("refusing to start —
@@ -112,33 +116,62 @@ func readLogTailFrom(path string, offset int64, maxBytes int64) string {
 	return strings.TrimSpace(string(raw))
 }
 
+type DesktopLaunchOptions struct {
+	ExtraArgs       []string
+	DryRun          bool
+	ExclusiveSwitch bool
+}
+
 // LaunchDesktop spawns an isolated Claude Desktop instance directly (bypassing `open -a` flag loss),
 // verifies the process survives initial startup checks, and brings its window to the foreground.
 func LaunchDesktop(ctx context.Context, cfg *config.Config, selfBin, profileName string, extraArgs []string, dryRun bool) (*DesktopSpec, int, error) {
+	spec, pid, _, err := LaunchDesktopWithOptions(ctx, cfg, selfBin, profileName, DesktopLaunchOptions{
+		ExtraArgs:       extraArgs,
+		DryRun:          dryRun,
+		ExclusiveSwitch: cfg != nil && cfg.Identity.SingleActiveDesktop,
+	})
+	return spec, pid, err
+}
+
+// LaunchDesktopWithOptions launches an isolated Claude Desktop instance with configurable
+// single-active-instance switching so macOS LaunchServices claude:// OAuth deep-links
+// always route to the target profile window instead of a stale background profile.
+func LaunchDesktopWithOptions(ctx context.Context, cfg *config.Config, selfBin, profileName string, opts DesktopLaunchOptions) (*DesktopSpec, int, []string, error) {
 	if profileName == "" {
 		profileName = cfg.ActiveProfile
 	}
 	prof, err := profile.Ensure(cfg, profileName, "")
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	gate, err := Preflight(ctx, cfg, selfBin, dryRun)
+	gate, err := Preflight(ctx, cfg, selfBin, opts.DryRun)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	spec, err := BuildDesktopSpec(cfg, prof, gate, extraArgs)
+	spec, err := BuildDesktopSpec(cfg, prof, gate, opts.ExtraArgs)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
-	if dryRun {
-		return spec, 0, nil
+	if opts.DryRun {
+		return spec, 0, nil, nil
+	}
+
+	var stoppedOthers []string
+	if opts.ExclusiveSwitch {
+		stoppedOthers = StopOtherIsolatedDesktops(cfg, prof.DesktopDir)
 	}
 
 	// If an isolated Claude Desktop for the exact same profile is already running,
-	// bring it cleanly to the foreground instead of triggering an Electron second-instance exit.
+	// bring it cleanly to the foreground (and deliver any claude:// deep links via AppleEvent)
+	// instead of triggering an Electron second-instance exit.
 	if existingPID := findRunningIsolatedDesktopPID(cfg, prof.DesktopDir); existingPID > 0 {
+		for _, arg := range opts.ExtraArgs {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(arg)), "claude://") {
+				deliverDeepLinkToRunningDesktop(arg)
+			}
+		}
 		focusProcessWindow(existingPID)
-		return spec, existingPID, nil
+		return spec, existingPID, stoppedOthers, nil
 	}
 
 	_ = config.EnsureDirs()
@@ -160,7 +193,7 @@ func LaunchDesktop(ctx context.Context, cfg *config.Config, selfBin, profileName
 		if logFile != nil {
 			_ = logFile.Close()
 		}
-		return spec, 0, fmt.Errorf("launch Claude Desktop: %w", err)
+		return spec, 0, stoppedOthers, fmt.Errorf("launch Claude Desktop: %w", err)
 	}
 	if logFile != nil {
 		// Child process owns its own duplicated fd; close parent handle safely without SIGPIPE risk.
@@ -187,14 +220,14 @@ func LaunchDesktop(ctx context.Context, cfg *config.Config, selfBin, profileName
 			detail = strings.Join(lines, " | ")
 		}
 		if exitErr != nil {
-			return spec, 0, fmt.Errorf("Claude Desktop 启动后立即退出 (%v): %s", exitErr, detail)
+			return spec, 0, stoppedOthers, fmt.Errorf("Claude Desktop 启动后立即退出 (%v): %s", exitErr, detail)
 		}
 		// Exit 0 can occur if Electron handed off to an already-running instance for the same userDataDir.
 		if existingPID := findRunningIsolatedDesktopPID(cfg, prof.DesktopDir); existingPID > 0 {
 			focusProcessWindow(existingPID)
-			return spec, existingPID, nil
+			return spec, existingPID, stoppedOthers, nil
 		}
-		return spec, 0, fmt.Errorf("Claude Desktop 启动后提前退出 (exit 0): %s", detail)
+		return spec, 0, stoppedOthers, fmt.Errorf("Claude Desktop 启动后提前退出 (exit 0): %s", detail)
 	case <-time.After(1500 * time.Millisecond):
 		// Process survived startup checks; bring its window to the front and notify user.
 		focusProcessWindow(pid)
@@ -203,17 +236,119 @@ func LaunchDesktop(ctx context.Context, cfg *config.Config, selfBin, profileName
 			if ip == "" {
 				ip = gate.LastProbe.EgressIP
 			}
-			_ = exec.Command("/usr/bin/osascript", "-e",
-				fmt.Sprintf(`display notification "档案 %s 已进入安心模式 · 静态出口 %s" with title "PeaceClaude 已就绪"`, spec.Profile, ip)).Start()
+			msg := fmt.Sprintf("档案 %s 已进入安心模式 · 静态出口 %s", spec.Profile, ip)
+			if len(stoppedOthers) > 0 {
+				msg = fmt.Sprintf("已切换至档案 %s（停用旧窗口以防登录回调串号）· 出口 %s", spec.Profile, ip)
+			}
+			runDetached("/usr/bin/osascript", "-e",
+				fmt.Sprintf(`display notification "%s" with title "PeaceClaude 已就绪"`, EscapeAppleScript(msg)))
 		}
-		return spec, pid, nil
+		return spec, pid, stoppedOthers, nil
 	}
+}
+
+// EscapeAppleScript safely escapes backslashes and quotes for AppleScript double-quoted string literals.
+func EscapeAppleScript(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	return s
+}
+
+func runDetached(name string, args ...string) {
+	cmd := exec.Command(name, args...)
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() {
+		_ = cmd.Wait()
+	}()
+}
+
+// ExtractClaudeDeepLinkArgs parses claude:// deep-link URLs from a raw process command line, deduplicated.
+func ExtractClaudeDeepLinkArgs(rawCmd string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, tok := range strings.Fields(rawCmd) {
+		clean := strings.Trim(tok, `"'`)
+		if strings.HasPrefix(strings.ToLower(clean), "claude://") && len(clean) > len("claude://") {
+			if !seen[clean] {
+				seen[clean] = true
+				out = append(out, clean)
+			}
+		}
+	}
+	return out
+}
+
+// ExtractUserDataDir extracts the --user-data-dir=<path> flag value from a raw process command line.
+func ExtractUserDataDir(rawCmd string) string {
+	const prefix = "--user-data-dir="
+	idx := strings.Index(rawCmd, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := rawCmd[idx+len(prefix):]
+	if rest == "" {
+		return ""
+	}
+	if rest[0] == '"' || rest[0] == '\'' {
+		q := rest[0]
+		if end := strings.IndexByte(rest[1:], q); end >= 0 {
+			return filepath.Clean(rest[1 : 1+end])
+		}
+	}
+	// Stop at next Chromium/Apple flag marker (" --" or " -Apple") to tolerate paths containing spaces.
+	cut := len(rest)
+	for _, sep := range []string{" --", " -Apple", " claude://"} {
+		if p := strings.Index(rest, sep); p >= 0 && p < cut {
+			cut = p
+		}
+	}
+	return filepath.Clean(strings.TrimSpace(rest[:cut]))
+}
+
+// StopOtherIsolatedDesktops terminates running isolated Claude Desktop instances belonging to other profiles
+// so macOS LaunchServices routes claude:// OAuth callbacks exclusively to the active target profile.
+func StopOtherIsolatedDesktops(cfg *config.Config, targetDataDir string) []string {
+	rep := host.InspectRunningDesktop(cfg)
+	wantDir := filepath.Clean(targetDataDir)
+	var stopPIDs []string
+	for _, p := range rep.Processes {
+		cmd := p.RawCommand
+		if cmd == "" {
+			cmd = p.Command
+		}
+		dataDir := ExtractUserDataDir(cmd)
+		if p.Isolated && dataDir != "" && dataDir != wantDir {
+			stopPIDs = append(stopPIDs, p.PID)
+		}
+	}
+	if len(stopPIDs) == 0 {
+		return nil
+	}
+	TerminatePIDs(stopPIDs, 4*time.Second)
+	// Allow LaunchServices a brief moment to unregister the exited bundle handle before relaunching.
+	time.Sleep(250 * time.Millisecond)
+	return stopPIDs
+}
+
+func deliverDeepLinkToRunningDesktop(deepLink string) {
+	url := strings.TrimSpace(deepLink)
+	if !strings.HasPrefix(strings.ToLower(url), "claude://") {
+		return
+	}
+	runDetached("/usr/bin/open", "-b", "com.anthropic.claudefordesktop", url)
 }
 
 func findRunningIsolatedDesktopPID(cfg *config.Config, dataDir string) int {
 	rep := host.InspectRunningDesktop(cfg)
+	wantDir := filepath.Clean(dataDir)
 	for _, p := range rep.Processes {
-		if p.Isolated && strings.Contains(p.Command, "--user-data-dir="+dataDir) {
+		cmd := p.RawCommand
+		if cmd == "" {
+			cmd = p.Command
+		}
+		if p.Isolated && ExtractUserDataDir(cmd) == wantDir {
 			if pid, err := strconv.Atoi(p.PID); err == nil && pid > 1 {
 				return pid
 			}
@@ -231,7 +366,7 @@ func focusProcessWindow(pid int) {
 		set frontmost of first process whose unix id is %d to true
 	end try
 end tell`, pid)
-	_ = exec.Command("/usr/bin/osascript", "-e", script).Start()
+	runDetached("/usr/bin/osascript", "-e", script)
 }
 
 // TerminatePIDs cleanly terminates exposed (non-isolated) Claude Desktop main PIDs
@@ -276,7 +411,7 @@ func TerminatePIDs(pids []string, wait time.Duration) int {
 }
 
 // InstallDesktopLauncherApp builds `/Applications/PeaceClaude.app` (or ~/Applications fallback)
-// with an isolated launcher script, macOS critical alert dialog on fail-closed block, and custom icon.
+// as a native Swift/WKWebView management console app (falling back to shell launcher if swiftc is unavailable).
 func InstallDesktopLauncherApp(binPath string) (string, error) {
 	targetDir := "/Applications"
 	if f, err := os.CreateTemp(targetDir, ".peaceclaude-write-test-*"); err == nil {
@@ -305,7 +440,25 @@ func InstallDesktopLauncherApp(binPath string) (string, error) {
 		}
 	}
 
-	plist := `<?xml version="1.0" encoding="UTF-8"?>
+	nativeBinPath := filepath.Join(macOSDir, "PeaceClaude")
+	launcherPath := filepath.Join(macOSDir, "launcher")
+	execName := "launcher"
+
+	if builtNative := buildNativeMacOSAppBinary(nativeBinPath); builtNative {
+		execName = "PeaceClaude"
+		_ = os.Remove(launcherPath)
+	} else {
+		_ = os.Remove(nativeBinPath)
+		launcherScript := fmt.Sprintf(`#!/bin/sh
+# Generated by peaceclaude setup; rewritten on upgrade, do not edit manually.
+'%s' ui >>'%s' 2>&1
+`, binPath, config.AppLauncherLog())
+		if err := os.WriteFile(launcherPath, []byte(launcherScript), 0o755); err != nil {
+			return "", err
+		}
+	}
+
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -314,7 +467,7 @@ func InstallDesktopLauncherApp(binPath string) (string, error) {
   <key>CFBundleDisplayName</key>
   <string>PeaceClaude</string>
   <key>CFBundleExecutable</key>
-  <string>launcher</string>
+  <string>%s</string>
   <key>CFBundleIconFile</key>
   <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
@@ -329,39 +482,51 @@ func InstallDesktopLauncherApp(binPath string) (string, error) {
   <string>1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
 </dict>
 </plist>
-`
+`, execName)
 	if err := os.WriteFile(filepath.Join(contents, "Info.plist"), []byte(plist), 0o644); err != nil {
-		return "", err
-	}
-
-	logPath := config.AppLauncherLog()
-	launcherScript := fmt.Sprintf(`#!/bin/sh
-# Generated by peaceclaude setup; rewritten on upgrade, do not edit manually.
-mkdir -p "$(dirname '%s')"
-PEACECLAUDE_LAUNCHED_BY=launcher '%s' app run >>'%s' 2>&1
-status=$?
-if [ "$status" -ne 0 ]; then
-/usr/bin/osascript - 'PeaceClaude — 安全拦截' "$(/usr/bin/tail -n 12 '%s')" <<'APPLESCRIPT'
-on run argv
-display alert (item 1 of argv) message (item 2 of argv) as critical
-end run
-APPLESCRIPT
-exit "$status"
-fi
-`, logPath, binPath, logPath, logPath)
-	launcherPath := filepath.Join(macOSDir, "launcher")
-	if err := os.WriteFile(launcherPath, []byte(launcherScript), 0o755); err != nil {
 		return "", err
 	}
 
 	// Generate crisp custom shield-lock icon (.icns)
 	_ = generateAppIcon(filepath.Join(resDir, "AppIcon.icns"))
+	if execName == "PeaceClaude" {
+		if codesign, err := exec.LookPath("codesign"); err == nil {
+			_ = exec.Command(codesign, "--force", "--deep", "--sign", "-", appDir).Run()
+		}
+	}
 	// Register with LaunchServices so Spotlight & Applications show PeaceClaude immediately
 	_ = exec.Command("touch", appDir).Run()
 	_ = exec.Command("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-f", appDir).Run()
 	return appDir, nil
+}
+
+func buildNativeMacOSAppBinary(outBin string) bool {
+	swiftc, err := exec.LookPath("swiftc")
+	if err != nil {
+		return false
+	}
+	tmpDir, err := os.MkdirTemp("", "peaceclaude-swift-*")
+	if err != nil {
+		return false
+	}
+	defer os.RemoveAll(tmpDir)
+	srcPath := filepath.Join(tmpDir, "main.swift")
+	if err := os.WriteFile(srcPath, []byte(macOSAppSwiftSrc), 0o600); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, swiftc, "-O", "-framework", "Cocoa", "-framework", "WebKit", srcPath, "-o", outBin)
+	return cmd.Run() == nil
 }
 
 func generateAppIcon(icnsDst string) error {

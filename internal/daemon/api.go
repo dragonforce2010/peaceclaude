@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"peaceclaude/internal/config"
@@ -34,6 +35,11 @@ func (s *Server) controlHandler() http.Handler {
 	mux.HandleFunc("/api/profiles/create", s.withCSRF(s.handleProfileCreate))
 	mux.HandleFunc("/api/profiles/use", s.withCSRF(s.handleProfileUse))
 	mux.HandleFunc("/api/profiles/clean", s.withCSRF(s.handleProfileClean))
+	mux.HandleFunc("/api/accounts", s.handleAccounts)
+	mux.HandleFunc("/api/accounts/detail", s.handleAccountDetail)
+	mux.HandleFunc("/api/accounts/update", s.withCSRF(s.handleAccountUpdate))
+	mux.HandleFunc("/api/accounts/delete", s.withCSRF(s.handleAccountDelete))
+	mux.HandleFunc("/api/accounts/stop-desktop", s.withCSRF(s.handleAccountStopDesktop))
 	mux.HandleFunc("/api/rules/toggle", s.withCSRF(s.handleRulesToggle))
 	mux.HandleFunc("/api/doctor", s.handleDoctor)
 	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
@@ -42,9 +48,30 @@ func (s *Server) controlHandler() http.Handler {
 	mux.HandleFunc("/api/desktop/takeover", s.withCSRF(s.handleDesktopTakeover))
 	mux.HandleFunc("/api/launch/desktop", s.withCSRF(s.handleLaunchDesktop))
 	mux.HandleFunc("/api/launch/browser", s.withCSRF(s.handleLaunchBrowser))
+	mux.HandleFunc("/api/browser-pac", s.withCSRF(s.handleBrowserPAC))
 	mux.HandleFunc("/api/config/update", s.withCSRF(s.handleConfigUpdate))
+	mux.HandleFunc("/api/workbench/lock", s.withCSRF(s.handleWorkbenchLock))
+	mux.HandleFunc("/api/appearance", s.handleAppearanceGet)
+	mux.HandleFunc("/api/appearance/update", s.withCSRF(s.handleAppearanceUpdate))
+	mux.HandleFunc("/api/remote", s.handleRemoteStatus)
+	mux.HandleFunc("/api/remote/pair", s.withCSRF(s.handleRemotePairCreate))
+	mux.HandleFunc("/api/remote/revoke", s.withCSRF(s.handleRemoteRevoke))
+	mux.HandleFunc("/api/remote/relay", s.withCSRF(s.handleRemoteRelayUpdate))
 	mux.HandleFunc("/api/shutdown", s.withCSRF(s.handleShutdown))
 	mux.HandleFunc("/peaceclaude.pac", s.handlePAC)
+	mux.HandleFunc("/mobile", func(w http.ResponseWriter, r *http.Request) {
+		raw, err := ui.MobileHTML()
+		if err != nil {
+			http.Error(w, "mobile UI not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(raw)
+	})
+	mux.HandleFunc("/mobile/api/redeem", s.withCSRF(s.handleMobileRedeem))
+	mux.HandleFunc("/mobile/api/state", s.withMobileAuth(s.handleMobileState))
+	mux.HandleFunc("/mobile/api/action", s.withMobileAuth(s.handleMobileAction))
 	mux.Handle("/", ui.Handler())
 	return mux
 }
@@ -103,17 +130,27 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
-	s.mu.RLock()
-	cfg := *s.cfg
-	s.mu.RUnlock()
+	cfg := s.configSnapshot()
 
 	profs, _ := profile.List(&cfg)
 	directHits := s.currentDirectHits()
+	remoteSt := s.remoteMgr.Status(&cfg, s.mobileBindAddr())
+	if remoteSt.ActivePair != nil {
+		// Redact pairing secret & QR payload from passive polling /api/status;
+		// full ticket is returned exclusively by /api/remote and POST /api/remote/pair.
+		ap := *remoteSt.ActivePair
+		ap.Code = ""
+		ap.URL = ""
+		ap.SVG = ""
+		remoteSt.ActivePair = &ap
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":            version.Version,
 		"pid":                os.Getpid(),
 		"uptime_sec":         int64(time.Since(s.startedAt).Seconds()),
+		"host_user":          currentHostUsername(),
+		"ui_locked":          s.uiLocked.Load(),
 		"config":             cfg.Redacted(),
 		"gate":               s.gate.Snapshot(),
 		"stats":              s.audit.Stats(),
@@ -124,6 +161,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"rules":              profile.GetRulesStatus(&cfg),
 		"direct_leaks_count": len(directHits),
 		"browser_pac":        host.InspectBrowserPAC(&cfg),
+		"storage":            collectStorageSummary(),
+		"remote":             remoteSt,
 	})
 }
 
@@ -218,8 +257,10 @@ func (s *Server) handleCaptureToggle(w http.ResponseWriter, r *http.Request) {
 	}
 	s.audit.SetCaptureEnabled(body.Enabled)
 	s.mu.Lock()
-	s.cfg.Capture.Enabled = body.Enabled
-	_ = config.Save(s.cfg)
+	next := *s.cfg
+	next.Capture.Enabled = body.Enabled
+	_ = config.Save(&next)
+	s.swapConfigLocked(next)
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]bool{"enabled": body.Enabled})
 }
@@ -246,8 +287,267 @@ func (s *Server) handleProfiles(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
+		Name               string `json:"name"`
+		Note               string `json:"note"`
+		DisplayName        string `json:"display_name"`
+		ManualPlan         string `json:"manual_plan"`
+		ManualRegisteredAt string `json:"manual_registered_at"`
+		UseNow             bool   `json:"use_now"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Lock()
+	cfg := *s.cfg
+	s.mu.Unlock()
+	name := strings.TrimSpace(body.Name)
+	p, err := profile.Ensure(&cfg, name, strings.TrimSpace(body.Note))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if body.DisplayName != "" || body.ManualPlan != "" || body.ManualRegisteredAt != "" {
+		patch := profile.MetaPatch{}
+		if body.DisplayName != "" {
+			patch.DisplayName = &body.DisplayName
+		}
+		if body.ManualPlan != "" {
+			patch.ManualPlan = &body.ManualPlan
+		}
+		if body.ManualRegisteredAt != "" {
+			patch.ManualRegisteredAt = &body.ManualRegisteredAt
+		}
+		updated, err2 := profile.UpdateMeta(&cfg, name, patch)
+		if err2 != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err2.Error()})
+			return
+		}
+		p = updated
+	}
+	if body.UseNow {
+		s.mu.Lock()
+		next := *s.cfg
+		next.ActiveProfile = name
+		if config.Save(&next) == nil {
+			s.swapConfigLocked(next)
+		}
+		s.mu.Unlock()
+		p.Active = true
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+type accountView struct {
+	profile.Profile
+	Usage             profile.UsageSnapshot `json:"usage"`
+	RunningDesktopPID string                `json:"running_desktop_pid,omitempty"`
+	CLICommand        string                `json:"cli_command"`
+}
+
+func findRunningPIDsForProfile(rep host.DesktopInspectReport, prof profile.Profile) []string {
+	var pids []string
+	for _, proc := range rep.Processes {
+		cmd := proc.RawCommand
+		if cmd == "" {
+			cmd = proc.Command
+		}
+		if strings.Contains(cmd, "--user-data-dir="+prof.DesktopDir) {
+			pids = append(pids, proc.PID)
+		}
+	}
+	return pids
+}
+
+func pickRecommendedProfile(items []accountView) (name string, reason string) {
+	if len(items) == 0 {
+		return "", ""
+	}
+	bestIdx := -1
+	bestScore := 1e9
+	for i, it := range items {
+		if it.Usage.FiveHour == nil && it.Usage.Weekly == nil {
+			continue
+		}
+		fh := 0.0
+		if it.Usage.FiveHour != nil {
+			fh = it.Usage.FiveHour.Utilization
+		}
+		wk := 0.0
+		if it.Usage.Weekly != nil {
+			wk = it.Usage.Weekly.Utilization
+		}
+		score := wk*0.6 + fh*0.4
+		if score < bestScore {
+			bestScore = score
+			bestIdx = i
+		}
+	}
+	if bestIdx >= 0 {
+		it := items[bestIdx]
+		return it.Name, "当前剩余额度最充裕，建议优先使用"
+	}
+	return items[0].Name, "当前默认隔离档案"
+}
+
+func (s *Server) handleAccounts(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+
+	list, err := profile.List(&cfg)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	refresh := r.URL.Query().Get("refresh") == "1"
+	withUsage := r.URL.Query().Get("with_usage") != "0"
+
+	rep := host.InspectRunningDesktop(&cfg)
+	views := make([]accountView, len(list))
+
+	var wg sync.WaitGroup
+	for i, p := range list {
+		pids := findRunningPIDsForProfile(rep, p)
+		runningPID := ""
+		if len(pids) > 0 {
+			runningPID = pids[0]
+		}
+		cliCmd := "peaceclaude cli --profile " + p.Name
+		if p.Name == cfg.ActiveProfile {
+			cliCmd = "peaceclaude cli"
+		}
+		views[i] = accountView{
+			Profile:           p,
+			RunningDesktopPID: runningPID,
+			CLICommand:        cliCmd,
+			Usage:             profile.UsageSnapshot{Profile: p.Name, Status: "no_token", Source: "none"},
+		}
+		if withUsage {
+			wg.Add(1)
+			go func(idx int, prof profile.Profile) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+				defer cancel()
+				views[idx].Usage = s.getProfileUsage(ctx, &cfg, &prof, refresh)
+			}(i, p)
+		}
+	}
+	wg.Wait()
+
+	recName, recReason := pickRecommendedProfile(views)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active":                cfg.ActiveProfile,
+		"single_active_desktop": cfg.Identity.SingleActiveDesktop,
+		"accounts":              views,
+		"recommended_profile":   recName,
+		"recommended_reason":    recReason,
+	})
+}
+
+func (s *Server) handleAccountDetail(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		name = cfg.ActiveProfile
+	}
+	p, err := profile.Load(&cfg, name)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	refresh := r.URL.Query().Get("refresh") == "1"
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	usage := s.getProfileUsage(ctx, &cfg, p, refresh)
+
+	rep := host.InspectRunningDesktop(&cfg)
+	pids := findRunningPIDsForProfile(rep, *p)
+	runningPID := ""
+	if len(pids) > 0 {
+		runningPID = pids[0]
+	}
+	cliCmd := "peaceclaude cli --profile " + p.Name
+	if p.Name == cfg.ActiveProfile {
+		cliCmd = "peaceclaude cli"
+	}
+	writeJSON(w, http.StatusOK, accountView{
+		Profile:           *p,
+		Usage:             usage,
+		RunningDesktopPID: runningPID,
+		CLICommand:        cliCmd,
+	})
+}
+
+func (s *Server) handleAccountUpdate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name               string  `json:"name"`
+		DisplayName        *string `json:"display_name"`
+		Note               *string `json:"note"`
+		ManualPlan         *string `json:"manual_plan"`
+		ManualRegisteredAt *string `json:"manual_registered_at"`
+		Timezone           *string `json:"timezone"`
+		Language           *string `json:"language"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	locked := (body.ManualPlan != nil && strings.TrimSpace(*body.ManualPlan) != "") ||
+		(body.ManualRegisteredAt != nil && strings.TrimSpace(*body.ManualRegisteredAt) != "")
+	updated, err := profile.UpdateMeta(&cfg, name, profile.MetaPatch{
+		DisplayName:        body.DisplayName,
+		Note:               body.Note,
+		ManualPlan:         body.ManualPlan,
+		ManualRegisteredAt: body.ManualRegisteredAt,
+		ManualLocked:       &locked,
+		Timezone:           body.Timezone,
+		Language:           body.Language,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (s *Server) handleAccountDelete(w http.ResponseWriter, r *http.Request) {
+	var body struct {
 		Name string `json:"name"`
-		Note string `json:"note"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	cfg := s.configSnapshot()
+	p, loadErr := profile.Load(&cfg, name)
+	if loadErr == nil {
+		rep := host.InspectRunningDesktop(&cfg)
+		if pids := findRunningPIDsForProfile(rep, *p); len(pids) > 0 {
+			launcher.TerminatePIDs(pids, 3*time.Second)
+		}
+	}
+	err := profile.Delete(&cfg, name)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.usageMu.Lock()
+	delete(s.usageCache, name)
+	s.usageMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "deleted": name})
+}
+
+func (s *Server) handleAccountStopDesktop(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -256,12 +556,22 @@ func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	cfg := *s.cfg
 	s.mu.RUnlock()
-	p, err := profile.Ensure(&cfg, strings.TrimSpace(body.Name), strings.TrimSpace(body.Note))
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = cfg.ActiveProfile
+	}
+	p, err := profile.Load(&cfg, name)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	rep := host.InspectRunningDesktop(&cfg)
+	pids := findRunningPIDsForProfile(rep, *p)
+	stopped := 0
+	if len(pids) > 0 {
+		stopped = launcher.TerminatePIDs(pids, 4*time.Second)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "stopped": stopped})
 }
 
 func (s *Server) handleProfileUse(w http.ResponseWriter, r *http.Request) {
@@ -274,13 +584,17 @@ func (s *Server) handleProfileUse(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.TrimSpace(body.Name)
 	s.mu.Lock()
-	if _, err := profile.Ensure(s.cfg, name, ""); err != nil {
+	next := *s.cfg
+	if _, err := profile.Ensure(&next, name, ""); err != nil {
 		s.mu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	s.cfg.ActiveProfile = name
-	err := config.Save(s.cfg)
+	next.ActiveProfile = name
+	err := config.Save(&next)
+	if err == nil {
+		s.swapConfigLocked(next)
+	}
 	s.mu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -322,7 +636,11 @@ func (s *Server) handleRulesToggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	st, err := profile.SyncAllRules(s.cfg, body.Enabled)
+	next := *s.cfg
+	st, err := profile.SyncAllRules(&next, body.Enabled)
+	if err == nil {
+		s.swapConfigLocked(next)
+	}
 	s.mu.Unlock()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -405,23 +723,42 @@ func (s *Server) handleDesktopTakeover(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLaunchDesktop(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Profile string `json:"profile"`
+		Profile    string `json:"profile"`
+		SetActive  bool   `json:"set_active"`
+		KeepOthers *bool  `json:"keep_others"`
 	}
 	_ = decodeJSON(r, &body)
-	s.mu.RLock()
-	cfg := *s.cfg
-	s.mu.RUnlock()
+	if body.SetActive && strings.TrimSpace(body.Profile) != "" {
+		s.mu.Lock()
+		next := *s.cfg
+		if _, err := profile.Ensure(&next, strings.TrimSpace(body.Profile), ""); err == nil {
+			next.ActiveProfile = strings.TrimSpace(body.Profile)
+			if config.Save(&next) == nil {
+				s.swapConfigLocked(next)
+			}
+		}
+		s.mu.Unlock()
+	}
+	cfg := s.configSnapshot()
 
-	spec, pid, err := launcher.LaunchDesktop(r.Context(), &cfg, s.selfBin, body.Profile, nil, false)
+	exclusive := cfg.Identity.SingleActiveDesktop
+	if body.KeepOthers != nil {
+		exclusive = !*body.KeepOthers
+	}
+	spec, pid, stoppedOthers, err := launcher.LaunchDesktopWithOptions(r.Context(), &cfg, s.selfBin, body.Profile, launcher.DesktopLaunchOptions{
+		ExclusiveSwitch: exclusive,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": err.Error()})
 		return
 	}
+	profile.TouchLastUsed(spec.Profile)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":       true,
-		"pid":      pid,
-		"profile":  spec.Profile,
-		"data_dir": spec.DataDir,
+		"ok":             true,
+		"pid":            pid,
+		"profile":        spec.Profile,
+		"data_dir":       spec.DataDir,
+		"stopped_others": stoppedOthers,
 	})
 }
 
@@ -431,19 +768,57 @@ func (s *Server) handleLaunchBrowser(w http.ResponseWriter, r *http.Request) {
 		URL     string `json:"url"`
 	}
 	_ = decodeJSON(r, &body)
-	s.mu.RLock()
-	cfg := *s.cfg
-	s.mu.RUnlock()
+	cfg := s.configSnapshot()
 
-	browser, _, err := launcher.LaunchLoginBrowser(r.Context(), &cfg, s.selfBin, body.Profile, body.URL, false)
+	targetURL := strings.TrimSpace(body.URL)
+	if targetURL == "" {
+		targetURL = "https://claude.ai/login"
+	}
+	browser, pid, _, err := launcher.LaunchLoginBrowserWithPID(r.Context(), &cfg, s.selfBin, body.Profile, targetURL, false)
 	if err != nil {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": err.Error()})
 		return
 	}
+	profName := strings.TrimSpace(body.Profile)
+	if profName == "" {
+		profName = cfg.ActiveProfile
+	}
+	profile.TouchLastUsed(profName)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":      true,
 		"browser": browser,
+		"pid":     pid,
+		"profile": profName,
+		"url":     targetURL,
 	})
+}
+
+func (s *Server) handleBrowserPAC(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled *bool `json:"enabled"`
+		Enable  *bool `json:"enable"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	var wantEnabled bool
+	switch {
+	case body.Enabled != nil:
+		wantEnabled = *body.Enabled
+	case body.Enable != nil:
+		wantEnabled = *body.Enable
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing required boolean field: enabled"})
+		return
+	}
+	cfg := s.configSnapshot()
+	st, _, err := host.SetSystemBrowserPAC(&cfg, wantEnabled, false)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
@@ -465,6 +840,7 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		AllowCorporateDirect  *bool    `json:"allow_corporate_direct"`
 		VMProxyEnabled        *bool    `json:"vm_proxy_enabled"`
 		AutoPeaceDesktop       *bool    `json:"auto_peace_desktop"`
+		SingleActiveDesktop   *bool    `json:"single_active_desktop"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -520,15 +896,16 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	if body.AutoPeaceDesktop != nil {
 		next.Identity.AutoPeaceDesktop = *body.AutoPeaceDesktop
 	}
+	if body.SingleActiveDesktop != nil {
+		next.Identity.SingleActiveDesktop = *body.SingleActiveDesktop
+	}
 
 	if err := config.Save(&next); err != nil {
 		s.mu.Unlock()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	*s.cfg = next
-	s.gateway.UpdateConfig(s.cfg)
-	s.gate.UpdateConfig(s.cfg)
+	s.swapConfigLocked(next)
 	s.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)

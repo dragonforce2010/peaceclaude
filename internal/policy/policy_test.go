@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"sync"
 	"testing"
 
 	"peaceclaude/internal/config"
@@ -71,4 +72,53 @@ func TestPolicyDecisions(t *testing.T) {
 	if d.Action != ActionProxy || d.SplitIPWarning {
 		t.Fatalf("direct-socks5 should proxy without split-IP warning, got %+v", d)
 	}
+}
+
+func TestAuthDomainsContainGoogleOAuthAssetsAndExcludeWWWGoogle(t *testing.T) {
+	cfg := config.Default()
+	eng := NewEngine(cfg)
+
+	for _, authHost := range []string{
+		"accounts.google.com:443",
+		"oauthaccountmanager.googleapis.com:443",
+		"www.googleapis.com:443",
+		"fonts.gstatic.com:443",
+		"lh3.googleusercontent.com:443",
+		"newassets.hcaptcha.com:443",
+		"b.stripe.network:443",
+	} {
+		if cat := eng.Classify(authHost[:len(authHost)-4]); cat != CategoryAuth {
+			t.Fatalf("expected %s to classify as auth, got %s", authHost, cat)
+		}
+	}
+
+	// Regular Google Search MUST NOT be forced into auth/proxy list so PAC stays DIRECT for daily search.
+	for _, pubHost := range []string{"www.google.com", "google.com", "mail.google.com"} {
+		if cat := eng.Classify(pubHost); cat != CategoryPublic {
+			t.Fatalf("expected %s to remain public/direct, got %s", pubHost, cat)
+		}
+	}
+}
+
+func TestEngineConcurrentUpdateAndEvaluate(t *testing.T) {
+	cfg := config.Default()
+	eng := NewEngine(cfg)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				if idx%2 == 0 {
+					next := config.Default()
+					next.Shield.AllowCorporateDirect = (j%2 == 0)
+					eng.UpdateConfig(next)
+				} else {
+					_ = eng.Evaluate("api.anthropic.com:443", true, "")
+					_ = eng.Classify("accounts.google.com")
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
 }

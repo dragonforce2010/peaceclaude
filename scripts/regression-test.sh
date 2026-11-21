@@ -8,6 +8,8 @@ BIN="${ROOT}/bin/peaceclaude"
 TMP_HOME="$(mktemp -d /tmp/peaceclaude-regression.XXXXXX)"
 export PEACECLAUDE_HOME="$TMP_HOME"
 export PEACECLAUDE_NO_NOTIFY=1
+export PEACECLAUDE_DISABLE_KEYCHAIN=1
+export PEACECLAUDE_DISABLE_AUTO_PEACE=1
 
 HTTP_PORT=29897
 SOCKS_PORT=29898
@@ -16,10 +18,23 @@ CTRL_PORT=29899
 PASS=0
 FAIL=0
 DAEMON_PID=""
+CURL_PIDS=()
 
 cleanup() {
+  for p in "${CURL_PIDS[@]:-}"; do
+    [[ -n "$p" ]] && kill "$p" 2>/dev/null || true
+  done
   if [[ -n "$DAEMON_PID" ]]; then
     kill "$DAEMON_PID" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+      if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+        break
+      fi
+      sleep 0.25
+    done
+    if kill -0 "$DAEMON_PID" 2>/dev/null; then
+      kill -9 "$DAEMON_PID" 2>/dev/null || true
+    fi
     wait "$DAEMON_PID" 2>/dev/null || true
   fi
   rm -rf "$TMP_HOME"
@@ -61,6 +76,7 @@ d["upstream"]["username"] = "reg-user"
 d["upstream"]["password"] = sec
 d["egress"]["fail_closed"] = True
 d["egress"]["expected_ip"] = exp
+d["remote"]["mobile_port"] = 29900
 d["capture"]["enabled"] = True
 open(p, "w").write(json.dumps(d, indent=2) + "\n")
 PY
@@ -72,11 +88,21 @@ else
   ok "config_redaction" "credentials properly redacted"
 fi
 
-# 3. Start real daemon in sandbox
+# 3. Ensure sandbox ports are free, then start real daemon in sandbox
+for port in "$HTTP_PORT" "$SOCKS_PORT" "$CTRL_PORT" 29900; do
+  if nc -z 127.0.0.1 "$port" 2>/dev/null; then
+    fail "sandbox_port_free" "port $port already in use before regression start"
+    exit 1
+  fi
+done
+
 "$BIN" service run >"$TMP_HOME/daemon-stdout.log" 2>&1 &
 DAEMON_PID=$!
 READY=0
 for _ in $(seq 1 40); do
+  if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+    break
+  fi
   if curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/health" >/dev/null 2>&1; then
     READY=1
     break
@@ -134,9 +160,42 @@ else
   ok "failclosed_cli_preflight" "CLI launch refused while Egress Gate is locked"
 fi
 
-# 8. Unlock & test real live static IP egress (if local proxy 7897 is reachable and EXPECTED_LIVE_IP is set)
-"$BIN" unlock >/dev/null
-if [[ "${SKIP_LIVE_EGRESS:-0}" != "1" && -n "$EXPECTED_LIVE_IP" ]] && nc -z 127.0.0.1 7897 2>/dev/null; then
+# 8. Sync live configured static-IP upstream into sandbox (prefer direct-http for reliable concurrency), unlock & test real static IP egress
+LIVE_CFG="$HOME/.peaceclaude/config.json"
+LIVE_UPSTREAM_READY=0
+if [[ "${SKIP_LIVE_EGRESS:-0}" != "1" && -r "$LIVE_CFG" ]]; then
+  LIVE_UPSTREAM_READY="$(python3 - "$LIVE_CFG" "http://127.0.0.1:${CTRL_PORT}" <<'PY'
+import json, sys, urllib.request
+cfg = json.load(open(sys.argv[1]))
+up = cfg.get("upstream", {})
+exp = cfg.get("egress", {}).get("expected_ip", "")
+if up.get("mode") in ("direct-socks5", "direct-http") and up.get("address") and exp:
+    mode = "direct-http" if up.get("mode") == "direct-socks5" else up.get("mode")
+    payload = json.dumps({
+        "upstream_mode": mode,
+        "upstream_address": up.get("address"),
+        "upstream_username": up.get("username", ""),
+        "upstream_password": up.get("password", ""),
+        "expected_ip": exp,
+    }).encode()
+    req = urllib.request.Request(sys.argv[2] + "/api/config/update", data=payload, method="POST",
+        headers={"Content-Type": "application/json", "Origin": sys.argv[2]})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        res = json.loads(r.read().decode())
+        print("1" if res.get("ok") else "0")
+else:
+    print("0")
+PY
+)"
+fi
+"$BIN" unlock >/dev/null || true
+CAN_LIVE=0
+if [[ "${SKIP_LIVE_EGRESS:-0}" != "1" && -n "$EXPECTED_LIVE_IP" ]]; then
+  if [[ "$LIVE_UPSTREAM_READY" == "1" ]] || nc -z 127.0.0.1 7897 2>/dev/null; then
+    CAN_LIVE=1
+  fi
+fi
+if [[ "$CAN_LIVE" == "1" ]]; then
   TRACE_OUT="$(curl -fsS --max-time 16 -x "http://127.0.0.1:${HTTP_PORT}" "https://claude.ai/cdn-cgi/trace" 2>/dev/null || true)"
   GOT_IP="$(awk -F= '/^ip=/{print $2; exit}' <<<"$TRACE_OUT")"
   if [[ "$GOT_IP" == "$EXPECTED_LIVE_IP" ]]; then
@@ -167,14 +226,48 @@ else
   fail "capture_sanitization" "expected [REDACTED] marker in capture records"
 fi
 
-# 10. Profile create / switch / rules sync / dry-run clean
-"$BIN" profile create qa-us --note "QA isolated profile" --use >/dev/null
+# 10. Multi-account CRUD, detail, usage redaction & rules sync
+ACCOUNTS_CREATE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"qa-us","display_name":"QA 备用 Max","note":"QA isolated profile","manual_plan":"Max 5x","manual_registered_at":"2026-06-15"}' \
+  "http://127.0.0.1:${CTRL_PORT}/api/profiles/create")"
+ACCOUNTS_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/accounts")"
+DETAIL_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/accounts/detail?name=qa-us")"
+if [[ "$ACCOUNTS_CREATE_CODE" == "200" && "$ACCOUNTS_JSON" == *"Max 5x"* && "$DETAIL_JSON" == *"QA 备用 Max"* ]]; then
+  ok "multi_account_api" "accounts list, plan/tenure metadata, and detail API verified"
+else
+  fail "multi_account_api" "unexpected account API output (code=$ACCOUNTS_CREATE_CODE)"
+fi
+
 "$BIN" rules on >/dev/null
 CLEAN_JSON="$("$BIN" clean --profile qa-us --dry-run --json)"
 if [[ "$CLEAN_JSON" == *'"profile": "qa-us"'* && "$CLEAN_JSON" == *'"dry_run": true'* ]]; then
   ok "profile_rules_clean" "profile isolation, rules sync, and clean dry-run verified"
 else
   fail "profile_rules_clean" "unexpected clean output"
+fi
+
+# Negative security test: OAuth accessToken injected into profile MUST NOT leak via /api/accounts or /api/accounts/detail
+echo '{"claudeAiOauth":{"accessToken":"sk-ant-oauth-secret-leak-check-888"}}' > "$TMP_HOME/profiles/qa-us/claude-config/.credentials.json"
+chmod 600 "$TMP_HOME/profiles/qa-us/claude-config/.credentials.json"
+DETAIL_AFTER_TOK="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/accounts/detail?name=qa-us")"
+if [[ "$DETAIL_AFTER_TOK" == *"sk-ant-oauth-secret-leak-check-888"* ]]; then
+  fail "oauth_token_redaction" "accessToken leaked in /api/accounts/detail!"
+else
+  ok "oauth_token_redaction" "OAuth accessToken strictly kept private from API responses"
+fi
+
+# Update & delete qa-us cleanly
+UPD_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" \
+  -H "Content-Type: application/json" -d '{"name":"qa-us","manual_plan":"Ultra"}' \
+  "http://127.0.0.1:${CTRL_PORT}/api/accounts/update")"
+DEL_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" \
+  -H "Content-Type: application/json" -d '{"name":"qa-us"}' \
+  "http://127.0.0.1:${CTRL_PORT}/api/accounts/delete")"
+if [[ "$UPD_CODE" == "200" && "$DEL_CODE" == "200" ]]; then
+  ok "account_update_delete" "account metadata update and delete endpoints verified"
+else
+  fail "account_update_delete" "update=$UPD_CODE delete=$DEL_CODE"
 fi
 
 # 11. pf anchor generation + pfctl -n syntax check
@@ -203,6 +296,128 @@ if [[ "$STATUS_JSON" == *"$SECRET_MARKER"* ]] || grep -q "$SECRET_MARKER" "$TMP_
   fail "no_secret_leak_anywhere" "secret marker found in status or daemon logs"
 else
   ok "no_secret_leak_anywhere" "zero credentials leaked across status and logs"
+fi
+
+# 14. Appearance (legacy + original preset names), workbench lock, remote QR pair + redeem + revoke end-to-end
+APP_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" \
+  -H "Content-Type: application/json" -d '{"theme_mode":"light","preset_light":"paper","preset_dark":"obsidian"}' \
+  "http://127.0.0.1:${CTRL_PORT}/api/appearance/update")"
+APP_LEGACY_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" \
+  -H "Content-Type: application/json" -d '{"theme_mode":"dark","preset_light":"codex","preset_dark":"ayu"}' \
+  "http://127.0.0.1:${CTRL_PORT}/api/appearance/update")"
+PAIR_JSON="$(curl -fsS -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" \
+  -H "Content-Type: application/json" -d '{"host":"127.0.0.1"}' \
+  "http://127.0.0.1:${CTRL_PORT}/api/remote/pair")"
+PAIR_CODE="$(python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("ticket",{}).get("code",""))' <<<"$PAIR_JSON")"
+if [[ "$APP_CODE" == "200" && "$APP_LEGACY_CODE" == "200" && "$PAIR_JSON" == *"<svg "* && "$PAIR_CODE" == PEACE-* ]]; then
+  # Verify /api/status does NOT expose raw pairing code while active pair exists.
+  PRE_REDEEM_STATUS="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/status")"
+  if [[ "$PRE_REDEEM_STATUS" == *"$PAIR_CODE"* ]]; then
+    fail "status_redacts_pairing_code" "/api/status leaked plaintext active pairing code"
+  fi
+  REDEEM_JSON="$(curl -fsS -X POST -H "Content-Type: application/json" \
+    -d "{\"code\":\"${PAIR_CODE}\",\"device_name\":\"RegTest\",\"os\":\"iOS\"}" \
+    "http://127.0.0.1:29900/mobile/api/redeem")"
+  MOB_TOK="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("token",""))' <<<"$REDEEM_JSON")"
+  DEV_ID="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("device",{}).get("id",""))' <<<"$REDEEM_JSON")"
+  MOB_STATE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${MOB_TOK}" "http://127.0.0.1:29900/mobile/api/state")"
+  # Single-device revoke keeps listener up on :29900 so we can observe strict 401 before Shutdown.
+  REV_DEV_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H "Content-Type: application/json" -d "{\"id\":\"${DEV_ID}\"}" "http://127.0.0.1:${CTRL_PORT}/api/remote/revoke")"
+  AFTER_DEV_REV_CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${MOB_TOK}" "http://127.0.0.1:29900/mobile/api/state")"
+  REV_ALL_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H "Content-Type: application/json" -d '{}' "http://127.0.0.1:${CTRL_PORT}/api/remote/revoke")"
+  if [[ "$MOB_STATE_CODE" == "200" && "$REV_DEV_CODE" == "200" && "$AFTER_DEV_REV_CODE" == "401" && "$REV_ALL_CODE" == "200" ]]; then
+    ok "appearance_and_remote_pairing" "appearance hot update (original + legacy) + redacted status + QR SVG + mobile token auth & :29900 revoke verified"
+  else
+    fail "appearance_and_remote_pairing" "state=$MOB_STATE_CODE dev_rev=$REV_DEV_CODE after_dev=$AFTER_DEV_REV_CODE all_rev=$REV_ALL_CODE"
+  fi
+else
+  fail "appearance_and_remote_pairing" "app=$APP_CODE legacy=$APP_LEGACY_CODE pair=$PAIR_CODE"
+fi
+
+# 14b. API contract integrity check (capture records, leaks host_direct_sockets, browser-pac missing field 400)
+CAP_CONTRACT="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/capture")"
+LEAK_CONTRACT="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/leaks")"
+PAC_BAD_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H "Content-Type: application/json" -d '{}' "http://127.0.0.1:${CTRL_PORT}/api/browser-pac")"
+if [[ "$CAP_CONTRACT" == *'"records"'* && "$LEAK_CONTRACT" == *'"host_direct_sockets"'* && "$PAC_BAD_CODE" == "400" ]]; then
+  ok "api_contract_integrity" "capture records, leaks host_direct_sockets, and strict /api/browser-pac 400 validation verified"
+else
+  fail "api_contract_integrity" "pac_bad=$PAC_BAD_CODE"
+fi
+
+# 15. Execute actual JavaScript FindProxyForURL from /peaceclaude.pac to verify OAuth domains & direct Google Search
+PAC_JS="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/peaceclaude.pac")"
+PAC_EVAL_RES="$(osascript -l JavaScript -e "$(cat <<JXA
+function dnsDomainIs(host, domain) {
+  return host === domain || (host.length > domain.length && host.slice(-domain.length) === domain);
+}
+function isPlainHostName(host) { return host.indexOf('.') === -1; }
+function ipToNum(ip) {
+  var p = ip.split('.');
+  if (p.length !== 4) return 0;
+  return (((+p[0]) << 24) | ((+p[1]) << 16) | ((+p[2]) << 8) | (+p[3])) >>> 0;
+}
+function isInNet(host, pattern, mask) {
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(host)) return false;
+  return (ipToNum(host) & ipToNum(mask)) === (ipToNum(pattern) & ipToNum(mask));
+}
+$PAC_JS
+var proxied = ['claude.ai', 'claude.ai.', 'api.anthropic.com', 'accounts.google.com', 'accounts.google.com.', 'fonts.gstatic.com', 'oauth2.googleapis.com', 'lh3.googleusercontent.com', 'newassets.hcaptcha.com', '160.79.104.10'];
+var direct = ['www.google.com', 'google.com', 'github.com'];
+var bad = [];
+proxied.forEach(function(h) {
+  var r = FindProxyForURL('https://' + h + '/', h);
+  if (r.indexOf('127.0.0.1:${HTTP_PORT}') === -1) bad.push('expected PROXY for ' + h + ', got ' + r);
+});
+direct.forEach(function(h) {
+  var r = FindProxyForURL('https://' + h + '/', h);
+  if (r !== 'DIRECT') bad.push('expected DIRECT for ' + h + ', got ' + r);
+});
+bad.length === 0 ? 'OK' : bad.join('; ');
+JXA
+)")"
+if [[ "$PAC_EVAL_RES" == "OK" ]]; then
+  ok "pac_js_execution_oauth_and_direct_google" "PAC JS routes Claude (including trailing-dot FQDN) + Google OAuth assets while keeping www.google.com DIRECT"
+else
+  fail "pac_js_execution_oauth_and_direct_google" "$PAC_EVAL_RES"
+fi
+
+# 16. Live OAuth/Anthropic asset reachability + 6-way concurrent proxy load + zero stream leak verification
+if [[ "$CAN_LIVE" == "1" ]]; then
+  ANTHROPIC_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 -x "http://127.0.0.1:${HTTP_PORT}" "https://api.anthropic.com/" || true)"
+  GOAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 -x "http://127.0.0.1:${HTTP_PORT}" "https://oauth2.googleapis.com/token" || true)"
+  GSTATIC_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 -x "http://127.0.0.1:${HTTP_PORT}" "https://www.gstatic.com/generate_204" || true)"
+  GOOGLE_AUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 -x "http://127.0.0.1:${HTTP_PORT}" "https://accounts.google.com/" || true)"
+  CONC_FAIL=0
+  CURL_PIDS=()
+  for i in 1 2 3 4 5 6; do
+    curl -fsS --max-time 14 -x "http://127.0.0.1:${HTTP_PORT}" "https://claude.ai/cdn-cgi/trace" >/dev/null &
+    CURL_PIDS+=("$!")
+  done
+  for pid in "${CURL_PIDS[@]}"; do
+    wait "$pid" || CONC_FAIL=$((CONC_FAIL + 1))
+  done
+  CURL_PIDS=()
+  LEAKED_STREAMS=1
+  for _ in 1 2 3 4 5 6; do
+    POST_STATUS="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/status")"
+    LEAKED_STREAMS="$(python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); g=d.get("gate",{}); print(g.get("active_streams", -1))' <<<"$POST_STATUS")"
+    if [[ "$LEAKED_STREAMS" == "0" ]]; then
+      break
+    fi
+    sleep 0.4
+  done
+  if [[ "$ANTHROPIC_CODE" =~ ^(200|403|404)$ && "$GOAUTH_CODE" =~ ^(200|400|404|405)$ && "$GSTATIC_CODE" == "204" && "$CONC_FAIL" == "0" && "$LEAKED_STREAMS" == "0" ]]; then
+    ok "live_oauth_chain_and_concurrency" "api.anthropic=$ANTHROPIC_CODE oauth2.googleapis=$GOAUTH_CODE gstatic=$GSTATIC_CODE (accounts.google=$GOOGLE_AUTH_CODE), 6x concurrent OK, active_streams=0"
+  else
+    fail "live_oauth_chain_and_concurrency" "anthropic=$ANTHROPIC_CODE goauth=$GOAUTH_CODE gstatic=$GSTATIC_CODE google=$GOOGLE_AUTH_CODE conc_fail=$CONC_FAIL active_streams=$LEAKED_STREAMS"
+  fi
+fi
+
+# 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes
+if ps -axo command= | grep -F "$TMP_HOME" | grep -qv grep; then
+  fail "sandbox_zero_desktop_interference" "sandbox regression spawned unexpected process referencing $TMP_HOME"
+else
+  ok "sandbox_zero_desktop_interference" "zero sandbox interference on host Claude.app desktop"
 fi
 
 echo "=== Regression Summary: pass=$PASS fail=$FAIL ==="

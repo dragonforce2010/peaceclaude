@@ -4,15 +4,25 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"peaceclaude/internal/config"
+)
+
+const (
+	// DefaultRetentionDays enforces 30-day rolling cleanup on persisted audit logs.
+	DefaultRetentionDays = 30
+	DefaultRetention     = DefaultRetentionDays * 24 * time.Hour
+	// DefaultTextLogMaxBytes caps auxiliary daemon/launcher logs to avoid unbounded disk growth.
+	DefaultTextLogMaxBytes int64 = 10 << 20
 )
 
 type LeakEvent struct {
@@ -87,8 +97,122 @@ func NewStore(captureEnabled bool, maxCapture int) *Store {
 		maxCapture:     maxCapture,
 		maxLeaks:       1000,
 	}
+	_, _ = s.PruneOlderThan(DefaultRetention)
 	s.loadTail()
 	return s
+}
+
+// PruneOlderThan removes JSONL entries older than maxAge on disk and caps auxiliary log files.
+func (s *Store) PruneOlderThan(maxAge time.Duration) (removedLeaks, removedCaptures int) {
+	if maxAge <= 0 {
+		maxAge = DefaultRetention
+	}
+	cutoff := time.Now().UTC().Add(-maxAge)
+
+	s.mu.Lock()
+	removedLeaks = pruneJSONLFile[LeakEvent](config.LeaksLogPath(), cutoff, func(ev LeakEvent) time.Time { return ev.Timestamp })
+	removedCaptures = pruneJSONLFile[CaptureRecord](config.CaptureLogPath(), cutoff, func(r CaptureRecord) time.Time { return r.Timestamp })
+	if removedLeaks > 0 {
+		kept := s.leaks[:0]
+		for _, ev := range s.leaks {
+			if !ev.Timestamp.IsZero() && !ev.Timestamp.Before(cutoff) {
+				kept = append(kept, ev)
+			}
+		}
+		s.leaks = kept
+	}
+	if removedCaptures > 0 {
+		kept := s.captures[:0]
+		for _, rec := range s.captures {
+			if !rec.Timestamp.IsZero() && !rec.Timestamp.Before(cutoff) {
+				kept = append(kept, rec)
+			}
+		}
+		s.captures = kept
+	}
+	s.mu.Unlock()
+
+	RotateTextLogs(DefaultTextLogMaxBytes)
+	return removedLeaks, removedCaptures
+}
+
+func pruneJSONLFile[T any](path string, cutoff time.Time, tsFn func(T) time.Time) int {
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) == 0 {
+		return 0
+	}
+	lines := strings.Split(string(raw), "\n")
+	var keptLines []string
+	removed := 0
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" {
+			continue
+		}
+		var item T
+		if err := json.Unmarshal([]byte(trim), &item); err != nil {
+			continue
+		}
+		ts := tsFn(item)
+		if !ts.IsZero() && ts.Before(cutoff) {
+			removed++
+			continue
+		}
+		keptLines = append(keptLines, trim)
+	}
+	if removed == 0 {
+		return 0
+	}
+	var out []byte
+	if len(keptLines) > 0 {
+		out = []byte(strings.Join(keptLines, "\n") + "\n")
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, out, 0o600) == nil {
+		_ = os.Rename(tmp, path)
+	}
+	return removed
+}
+
+// RotateTextLogs keeps daemon and launcher text logs compact (tail-truncated above maxBytes).
+func RotateTextLogs(maxBytes int64) {
+	if maxBytes <= 0 {
+		maxBytes = DefaultTextLogMaxBytes
+	}
+	keepTail := maxBytes / 5
+	if keepTail < 512*1024 {
+		keepTail = 512 * 1024
+	}
+	for _, p := range []string{
+		filepath.Join(config.LogsDir(), "daemon.log"),
+		filepath.Join(config.LogsDir(), "daemon.err.log"),
+		config.AppLauncherLog(),
+	} {
+		fi, err := os.Stat(p)
+		if err != nil || fi.Size() <= maxBytes {
+			continue
+		}
+		f, err := os.Open(p)
+		if err != nil {
+			continue
+		}
+		if _, err := f.Seek(-keepTail, io.SeekEnd); err != nil {
+			_ = f.Close()
+			continue
+		}
+		tail, err := io.ReadAll(f)
+		_ = f.Close()
+		if err != nil {
+			continue
+		}
+		if idx := strings.IndexByte(string(tail), '\n'); idx >= 0 && idx+1 < len(tail) {
+			tail = tail[idx+1:]
+		}
+		tmp := p + ".tmp"
+		if os.WriteFile(tmp, tail, 0o600) == nil {
+			_ = os.Rename(tmp, p)
+		}
+	}
 }
 
 func (s *Store) loadTail() {

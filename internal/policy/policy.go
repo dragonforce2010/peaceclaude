@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
 
 	"peaceclaude/internal/config"
 )
@@ -65,6 +66,9 @@ var (
 		"accounts.google.com",
 		"oauthaccountmanager.googleapis.com",
 		"apis.google.com",
+		"gstatic.com",
+		"googleapis.com",
+		"googleusercontent.com",
 		"hcaptcha.com",
 		"challenges.cloudflare.com",
 		"turnstile.cloudflare.com",
@@ -72,6 +76,7 @@ var (
 		"stripe.com",
 		"js.stripe.com",
 		"m.stripe.network",
+		"stripe.network",
 		"stytch.com",
 	}
 
@@ -92,6 +97,21 @@ var (
 	anthropicPrefixes []netip.Prefix
 	reservedPrefixes  []netip.Prefix
 )
+
+// ClaudeDomains returns a defensive copy of built-in Claude/Anthropic domains.
+func ClaudeDomains() []string {
+	return append([]string(nil), defaultClaudeDomains...)
+}
+
+// AuthDomains returns a defensive copy of built-in OAuth/captcha/billing auth domains.
+func AuthDomains() []string {
+	return append([]string(nil), defaultAuthDomains...)
+}
+
+// TelemetryDomains returns a defensive copy of built-in telemetry sink domains.
+func TelemetryDomains() []string {
+	return append([]string(nil), defaultTelemetryDomains...)
+}
 
 func init() {
 	for _, s := range append(append([]string{}, AnthropicV4CIDRs...), AnthropicV6CIDRs...) {
@@ -117,6 +137,7 @@ func init() {
 }
 
 type Engine struct {
+	mu  sync.RWMutex
 	cfg *config.Config
 }
 
@@ -125,7 +146,15 @@ func NewEngine(cfg *config.Config) *Engine {
 }
 
 func (e *Engine) UpdateConfig(cfg *config.Config) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.cfg = cfg
+}
+
+func (e *Engine) configSnapshot() *config.Config {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.cfg
 }
 
 func SplitHostPort(hostport string) (string, string) {
@@ -171,7 +200,7 @@ func IsAnthropicIP(ipStr string) bool {
 
 func IsLoopbackHost(host string) bool {
 	h := normalizeHost(host)
-	if h == "localhost" || strings.HasSuffix(h, ".localhost") || strings.HasSuffix(h, ".local") {
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
 		return true
 	}
 	addr, err := netip.ParseAddr(h)
@@ -212,12 +241,16 @@ func IsClaudeStreamHost(host string) bool {
 }
 
 func (e *Engine) Classify(host string) Category {
+	return classifyWithConfig(e.configSnapshot(), host)
+}
+
+func classifyWithConfig(cfg *config.Config, host string) Category {
 	h := normalizeHost(host)
 	if IsLoopbackHost(h) {
 		return CategoryLoopback
 	}
-	if e.cfg != nil {
-		for _, d := range e.cfg.Shield.ExtraBlockedDomains {
+	if cfg != nil {
+		for _, d := range cfg.Shield.ExtraBlockedDomains {
 			if matchesDomain(h, d) {
 				return CategoryTelemetry
 			}
@@ -236,8 +269,8 @@ func (e *Engine) Classify(host string) Category {
 			return CategoryAnthropic
 		}
 	}
-	if e.cfg != nil {
-		for _, d := range e.cfg.Shield.ExtraClaudeDomains {
+	if cfg != nil {
+		for _, d := range cfg.Shield.ExtraClaudeDomains {
 			if matchesDomain(h, d) {
 				return CategoryAnthropic
 			}
@@ -248,8 +281,8 @@ func (e *Engine) Classify(host string) Category {
 			return CategoryAuth
 		}
 	}
-	if e.cfg != nil {
-		for _, d := range e.cfg.Shield.CorporateDomains {
+	if cfg != nil {
+		for _, d := range cfg.Shield.CorporateDomains {
 			if matchesDomain(h, d) {
 				return CategoryCorporate
 			}
@@ -263,8 +296,9 @@ func (e *Engine) Classify(host string) Category {
 
 // Evaluate determines how the gateway handles a connection given current Egress Gate state.
 func (e *Engine) Evaluate(hostport string, gateOpen bool, gateReason string) Decision {
+	cfg := e.configSnapshot()
 	host, port := SplitHostPort(hostport)
-	cat := e.Classify(host)
+	cat := classifyWithConfig(cfg, host)
 	dec := Decision{
 		Host:           host,
 		Port:           port,
@@ -279,21 +313,21 @@ func (e *Engine) Evaluate(hostport string, gateOpen bool, gateReason string) Dec
 		return dec
 
 	case CategoryCorporate:
-		if e.cfg != nil && e.cfg.Shield.AllowCorporateDirect {
+		if cfg != nil && cfg.Shield.AllowCorporateDirect {
 			dec.Action = ActionDirectCorporate
 			dec.Reason = "corporate allowlist direct"
 			return dec
 		}
 
 	case CategoryTelemetry:
-		if e.cfg != nil && e.cfg.Shield.TelemetryShield {
+		if cfg != nil && cfg.Shield.TelemetryShield {
 			dec.Action = ActionBlockTelemetry
 			dec.Reason = "blocked by telemetry shield"
 			return dec
 		}
 
 	case CategoryPrivate:
-		if e.cfg != nil && e.cfg.Shield.BlockPrivateTargets {
+		if cfg != nil && cfg.Shield.BlockPrivateTargets {
 			dec.Action = ActionBlockPrivate
 			dec.Reason = "blocked private/internal IP target"
 			return dec
@@ -304,7 +338,7 @@ func (e *Engine) Evaluate(hostport string, gateOpen bool, gateReason string) Dec
 	}
 
 	// Protected or public egress traffic.
-	failClosed := e.cfg == nil || e.cfg.Egress.FailClosed
+	failClosed := cfg == nil || cfg.Egress.FailClosed
 	if !gateOpen && failClosed {
 		if gateReason == "" {
 			gateReason = "egress gate locked"
@@ -315,9 +349,9 @@ func (e *Engine) Evaluate(hostport string, gateOpen bool, gateReason string) Dec
 	}
 
 	// Detect split-IP risk when riding on a rule-based local proxy (e.g. Clash Verge).
-	if cat == CategoryPublic && e.cfg != nil && e.cfg.Upstream.Mode == "local-proxy" {
+	if cat == CategoryPublic && cfg != nil && cfg.Upstream.Mode == "local-proxy" {
 		dec.SplitIPWarning = true
-		if e.cfg.Egress.StrictDomainIsolation {
+		if cfg.Egress.StrictDomainIsolation {
 			dec.Action = ActionBlockStrictSplit
 			dec.Reason = "blocked non-Claude public host under local-proxy strict mode (prevents split-IP)"
 			return dec

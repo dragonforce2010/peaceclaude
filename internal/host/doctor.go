@@ -37,6 +37,7 @@ type DesktopProcAudit struct {
 	FlagsPresent []string `json:"flags_present"`
 	FlagsMissing []string `json:"flags_missing"`
 	Command      string   `json:"command"`
+	RawCommand   string   `json:"-"`
 }
 
 type DesktopInspectReport struct {
@@ -189,6 +190,7 @@ func InspectRunningDesktop(cfg *config.Config) DesktopInspectReport {
 		} else {
 			rep.ExposedCount++
 		}
+		rawCmd := cmdline
 		if len(cmdline) > 260 {
 			cmdline = cmdline[:260] + "..."
 		}
@@ -198,6 +200,7 @@ func InspectRunningDesktop(cfg *config.Config) DesktopInspectReport {
 			FlagsPresent: present,
 			FlagsMissing: missing,
 			Command:      cmdline,
+			RawCommand:   rawCmd,
 		})
 	}
 

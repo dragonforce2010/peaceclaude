@@ -31,7 +31,7 @@ func RenderPAC(cfg *config.Config, mode string) string {
 		}
 		return fmt.Sprintf(`// PeaceClaude PAC (mode=all) — routes all non-local traffic via PeaceClaude Fail-Closed Gateway
 function FindProxyForURL(url, host) {
-  host = host.toLowerCase();
+  host = host.toLowerCase().replace(/\.+$/, "");
   if (isPlainHostName(host) || host === "localhost" || host === "127.0.0.1" || host === "::1" || dnsDomainIs(host, ".local")) return "DIRECT";
 %s
   return "%s";
@@ -39,24 +39,32 @@ function FindProxyForURL(url, host) {
 `, strings.Join(bypassChecks, "\n"), proxyLine)
 	}
 
-	domains := []string{
-		"anthropic.com",
-		"claude.ai",
-		"claude.com",
-		"claudeusercontent.com",
-		"accounts.google.com",
-		"oauthaccountmanager.googleapis.com",
-		"hcaptcha.com",
-		"challenges.cloudflare.com",
-		"turnstile.cloudflare.com",
-		"sentry.io",
-		"statsigapi.net",
+	seen := make(map[string]struct{})
+	var domains []string
+	addDomain := func(raw string) {
+		clean := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(raw)), "*."), ".")
+		clean = strings.TrimSuffix(clean, ".")
+		if clean == "" {
+			return
+		}
+		if _, ok := seen[clean]; ok {
+			return
+		}
+		seen[clean] = struct{}{}
+		domains = append(domains, clean)
+	}
+
+	for _, d := range policy.ClaudeDomains() {
+		addDomain(d)
+	}
+	for _, d := range policy.AuthDomains() {
+		addDomain(d)
+	}
+	for _, d := range []string{"sentry.io", "statsigapi.net"} {
+		addDomain(d)
 	}
 	for _, extra := range cfg.Shield.ExtraClaudeDomains {
-		clean := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(extra)), "*."), ".")
-		if clean != "" {
-			domains = append(domains, clean)
-		}
+		addDomain(extra)
 	}
 
 	var domainChecks []string
@@ -77,7 +85,7 @@ function FindProxyForURL(url, host) {
 	return fmt.Sprintf(`// PeaceClaude PAC (mode=claude) — fail-closed Claude/Anthropic routing, everything else DIRECT
 function FindProxyForURL(url, host) {
   var PROXY = "%s";
-  host = host.toLowerCase();
+  host = host.toLowerCase().replace(/\.+$/, "");
 %s
   if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
 %s

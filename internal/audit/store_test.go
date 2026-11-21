@@ -62,3 +62,29 @@ func TestSanitizationAndPersistence(t *testing.T) {
 		t.Fatalf("unexpected leaks: %+v", leaks)
 	}
 }
+
+func TestPruneOlderThan30Days(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	s := NewStore(true, 50)
+	now := time.Now().UTC()
+
+	s.RecordLeak(LeakEvent{Timestamp: now.Add(-35 * 24 * time.Hour), Kind: "old_leak", Host: "old.example.com", Action: "warn", Reason: "expired"})
+	s.RecordLeak(LeakEvent{Timestamp: now.Add(-2 * 24 * time.Hour), Kind: "fresh_leak", Host: "fresh.example.com", Action: "warn", Reason: "recent"})
+	s.RecordCapture(CaptureRecord{Timestamp: now.Add(-40 * 24 * time.Hour), Protocol: "HTTPS", Host: "old.claude.ai", Category: "anthropic", Action: "proxy"})
+	s.RecordCapture(CaptureRecord{Timestamp: now.Add(-1 * time.Hour), Protocol: "HTTPS", Host: "api.anthropic.com", Category: "anthropic", Action: "proxy"})
+
+	removedLeaks, removedCaptures := s.PruneOlderThan(DefaultRetention)
+	if removedLeaks != 1 || removedCaptures != 1 {
+		t.Fatalf("expected 1 leak and 1 capture pruned, got leaks=%d captures=%d", removedLeaks, removedCaptures)
+	}
+
+	s2 := NewStore(true, 50)
+	leaks := s2.ListLeaks(0, 10)
+	caps := s2.ListCaptures(10)
+	if len(leaks) != 1 || leaks[0].Host != "fresh.example.com" {
+		t.Fatalf("unexpected remaining leaks: %+v", leaks)
+	}
+	if len(caps) != 1 || caps[0].Host != "api.anthropic.com" {
+		t.Fatalf("unexpected remaining captures: %+v", caps)
+	}
+}

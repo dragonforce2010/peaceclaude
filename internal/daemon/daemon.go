@@ -8,9 +8,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"peaceclaude/internal/audit"
@@ -21,6 +24,8 @@ import (
 	"peaceclaude/internal/policy"
 	"peaceclaude/internal/profile"
 	"peaceclaude/internal/proxy"
+	"peaceclaude/internal/remote"
+	"peaceclaude/internal/upstream"
 )
 
 type Server struct {
@@ -45,12 +50,26 @@ type Server struct {
 	directMu    sync.RWMutex
 	directHits  []host.DirectSocketHit
 
-	takeoverMu      sync.Mutex
-	preExistingPIDs map[string]bool
-	lastTakeover    time.Time
+	takeoverMu           sync.Mutex
+	preExistingPIDs      map[string]bool
+	lastTakeover         time.Time
+	takeoverAttempts     []time.Time
+	takeoverConsecFails  int
+	autoPeacePausedUntil time.Time
+	autoPeaceLockFile    *os.File
 
 	notifyMu    sync.Mutex
 	lastNotify  time.Time
+
+	usageMu    sync.RWMutex
+	usageCache map[string]profile.UsageSnapshot
+
+	remoteMgr        *remote.Manager
+	uiLocked         atomic.Bool
+	mobileMu         sync.Mutex
+	mobileLn         net.Listener
+	mobileSrv        *http.Server
+	mobileListenAddr string
 }
 
 func New(cfg *config.Config, selfBin string) *Server {
@@ -60,14 +79,16 @@ func New(cfg *config.Config, selfBin string) *Server {
 	gw := proxy.NewGateway(cfg, eng, gate, store)
 
 	s := &Server{
-		cfg:       cfg,
-		selfBin:   selfBin,
-		startedAt: time.Now().UTC(),
-		gate:      gate,
-		policy:    eng,
-		audit:     store,
-		gateway:   gw,
-		doneCh:    make(chan struct{}),
+		cfg:        cfg,
+		selfBin:    selfBin,
+		startedAt:  time.Now().UTC(),
+		gate:       gate,
+		policy:     eng,
+		audit:      store,
+		gateway:    gw,
+		doneCh:     make(chan struct{}),
+		usageCache: make(map[string]profile.UsageSnapshot),
+		remoteMgr:  remote.NewManager(),
 	}
 
 	gate.SetOnStateChange(func(open bool, reason string, res egress.ProbeResult) {
@@ -78,16 +99,57 @@ func New(cfg *config.Config, selfBin string) *Server {
 		} else {
 			log.Printf("[egress-gate] OPEN: egress=%s (%s · %s · TZ=%s)",
 				res.EgressIP, res.Country, res.City, gate.Snapshot().EffectiveTimezone)
+			go gw.WarmUpstream(context.Background())
 			s.notifyMacOS("PeaceClaude 恢复放行", fmt.Sprintf("静态 IP 出口就绪：%s (%s)", res.EgressIP, res.Country))
 		}
 	})
 	return s
 }
 
+func (s *Server) configSnapshot() config.Config {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	return cfg
+}
+
+// swapConfigLocked installs an immutable Copy-on-Write Config snapshot and propagates
+// it to gateway, policy engine, and egress gate while holding s.mu.
+func (s *Server) swapConfigLocked(next config.Config) *config.Config {
+	cp := next
+	s.cfg = &cp
+	s.gateway.UpdateConfig(s.cfg)
+	s.gate.UpdateConfig(s.cfg)
+	return s.cfg
+}
+
 func (s *Server) Gate() *egress.Gate      { return s.gate }
 func (s *Server) Gateway() *proxy.Gateway { return s.gateway }
 func (s *Server) Audit() *audit.Store     { return s.audit }
 func (s *Server) Done() <-chan struct{}   { return s.doneCh }
+
+const usageCacheTTL = 2 * time.Minute
+
+func (s *Server) getProfileUsage(ctx context.Context, cfg *config.Config, prof *profile.Profile, force bool) profile.UsageSnapshot {
+	if prof == nil {
+		return profile.UsageSnapshot{Status: "error", Source: "none"}
+	}
+	if !force {
+		s.usageMu.RLock()
+		cached, ok := s.usageCache[prof.Name]
+		s.usageMu.RUnlock()
+		if ok && time.Since(cached.FetchedAt) < usageCacheTTL && (cached.Status == "ok" || cached.Status == "history") {
+			return cached
+		}
+	}
+	gateOpen, _ := s.gate.AllowTraffic()
+	dialer := upstream.FromConfig(cfg.Upstream)
+	snap := profile.FetchUsage(ctx, cfg, prof, gateOpen, dialer)
+	s.usageMu.Lock()
+	s.usageCache[prof.Name] = snap
+	s.usageMu.Unlock()
+	return snap
+}
 
 func (s *Server) Start(ctx context.Context) error {
 	if err := config.EnsureDirs(); err != nil {
@@ -167,28 +229,52 @@ func (s *Server) Start(ctx context.Context) error {
 	}()
 	go s.hostLeakLoop(runCtx)
 	go s.desktopGuardLoop(runCtx)
+	go s.retentionLoop(runCtx)
+	if err := s.syncMobileListener(s.cfg); err != nil {
+		log.Printf("[remote] failed to start mobile listener: %v", err)
+	}
 	return nil
+}
+
+func (s *Server) retentionLoop(ctx context.Context) {
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			leaks, caps := s.audit.PruneOlderThan(audit.DefaultRetention)
+			if leaks > 0 || caps > 0 {
+				log.Printf("[audit-retention] pruned entries older than %d days: leaks=%d captures=%d",
+					audit.DefaultRetentionDays, leaks, caps)
+			}
+		}
+	}
 }
 
 func (s *Server) ControlAddr() string {
 	if s.ctrlLn != nil {
 		return s.ctrlLn.Addr().String()
 	}
-	return s.cfg.ControlAddr()
+	cfg := s.configSnapshot()
+	return cfg.ControlAddr()
 }
 
 func (s *Server) HTTPProxyAddr() string {
 	if s.httpLn != nil {
 		return s.httpLn.Addr().String()
 	}
-	return s.cfg.HTTPProxyAddr()
+	cfg := s.configSnapshot()
+	return cfg.HTTPProxyAddr()
 }
 
 func (s *Server) SOCKS5ProxyAddr() string {
 	if s.socksLn != nil {
 		return s.socksLn.Addr().String()
 	}
-	return s.cfg.SOCKS5ProxyAddr()
+	cfg := s.configSnapshot()
+	return cfg.SOCKS5ProxyAddr()
 }
 
 func (s *Server) Shutdown(ctx context.Context) {
@@ -206,6 +292,8 @@ func (s *Server) Shutdown(ctx context.Context) {
 		if s.ctrlSrv != nil {
 			_ = s.ctrlSrv.Shutdown(ctx)
 		}
+		s.stopMobileListener(ctx)
+		s.releaseAutoPeaceLock()
 		_ = os.Remove(config.DaemonPIDPath())
 		close(s.doneCh)
 	})
@@ -225,7 +313,7 @@ func (s *Server) probeLoop(ctx context.Context) {
 		}
 
 		wait := goodInt
-		if ok, _ := s.gate.AllowTraffic(); !ok {
+		if ok, _ := s.gate.AllowTraffic(); !ok || s.gate.Snapshot().ConsecutiveFails > 0 {
 			wait = badInt
 		}
 		timer := time.NewTimer(wait)
@@ -299,10 +387,102 @@ func (s *Server) snapshotPreExistingDesktop() {
 	s.takeoverMu.Unlock()
 }
 
+func shouldDisableAutoPeace() (bool, string) {
+	if os.Getenv("PEACECLAUDE_DISABLE_AUTO_PEACE") == "1" {
+		return true, "PEACECLAUDE_DISABLE_AUTO_PEACE=1"
+	}
+	if strings.TrimSpace(os.Getenv("PEACECLAUDE_HOME")) != "" && os.Getenv("PEACECLAUDE_FORCE_AUTO_PEACE") != "1" {
+		return true, "custom PEACECLAUDE_HOME sandbox"
+	}
+	return false, ""
+}
+
+func isAutoPeaceTarget(p host.DesktopProcAudit) bool {
+	if p.Isolated {
+		return false
+	}
+	raw := p.RawCommand
+	if raw == "" {
+		raw = p.Command
+	}
+	// Auto-Peace only intercepts unisolated native Claude.app launches that carry NO --user-data-dir.
+	// Any instance already launched with a custom/isolated --user-data-dir is left alone so two
+	// isolated or sandbox daemons can NEVER kill-loop each other.
+	return !strings.Contains(raw, "--user-data-dir=")
+}
+
+func (s *Server) acquireAutoPeaceLock() bool {
+	lockPath := filepath.Join("/tmp", fmt.Sprintf("peaceclaude-auto-peace-%d.lock", os.Getuid()))
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return false
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		return false
+	}
+	s.takeoverMu.Lock()
+	s.autoPeaceLockFile = f
+	s.takeoverMu.Unlock()
+	return true
+}
+
+func (s *Server) releaseAutoPeaceLock() {
+	s.takeoverMu.Lock()
+	f := s.autoPeaceLockFile
+	s.autoPeaceLockFile = nil
+	s.takeoverMu.Unlock()
+	if f != nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		_ = f.Close()
+	}
+}
+
+func (s *Server) allowAutoPeaceTrigger(now time.Time) bool {
+	if !s.autoPeacePausedUntil.IsZero() && now.Before(s.autoPeacePausedUntil) {
+		return false
+	}
+	cutoff := now.Add(-60 * time.Second)
+	kept := s.takeoverAttempts[:0]
+	for _, ts := range s.takeoverAttempts {
+		if ts.After(cutoff) {
+			kept = append(kept, ts)
+		}
+	}
+	s.takeoverAttempts = kept
+	if len(s.takeoverAttempts) >= 3 {
+		s.autoPeacePausedUntil = now.Add(10 * time.Minute)
+		log.Printf("[auto-peace] circuit breaker tripped (>=3 triggers in 60s), pausing auto-peace for 10m")
+		s.notifyMacOS("PeaceClaude Auto-Peace 已自动暂停", "检测到 60 秒内高频重复触发接管，已保护性暂停 10 分钟防止循环切窗")
+		return false
+	}
+	s.takeoverAttempts = append(s.takeoverAttempts, now)
+	return true
+}
+
+func (s *Server) recordAutoPeaceOutcome(now time.Time, failed bool) {
+	s.takeoverMu.Lock()
+	defer s.takeoverMu.Unlock()
+	if !failed {
+		s.takeoverConsecFails = 0
+		return
+	}
+	s.takeoverConsecFails++
+	if s.takeoverConsecFails >= 2 {
+		s.autoPeacePausedUntil = now.Add(10 * time.Minute)
+		log.Printf("[auto-peace] circuit breaker tripped (>=2 consecutive failures), pausing auto-peace for 10m")
+	}
+}
+
 // desktopGuardLoop watches for accidentally launched unisolated Claude.app processes
 // and automatically terminates & relaunches them under PeaceClaude's isolated profile.
 func (s *Server) desktopGuardLoop(ctx context.Context) {
-	if os.Getenv("PEACECLAUDE_DISABLE_AUTO_PEACE") == "1" {
+	if disabled, reason := shouldDisableAutoPeace(); disabled {
+		log.Printf("[auto-peace] watcher disabled (%s)", reason)
+		return
+	}
+	if !s.acquireAutoPeaceLock() {
+		log.Printf("[auto-peace] another PeaceClaude instance holds host auto-peace lock; watcher disabled here")
 		return
 	}
 	ticker := time.NewTicker(2 * time.Second)
@@ -332,6 +512,7 @@ func (s *Server) checkAndAutoPeaceDesktop(ctx context.Context) {
 		return
 	}
 
+	now := time.Now()
 	s.takeoverMu.Lock()
 	if time.Since(s.lastTakeover) < 5*time.Second {
 		s.takeoverMu.Unlock()
@@ -339,7 +520,7 @@ func (s *Server) checkAndAutoPeaceDesktop(ctx context.Context) {
 	}
 	var newExposed []string
 	for _, p := range rep.Processes {
-		if !p.Isolated && !s.preExistingPIDs[p.PID] {
+		if isAutoPeaceTarget(p) && !s.preExistingPIDs[p.PID] {
 			newExposed = append(newExposed, p.PID)
 		}
 	}
@@ -347,8 +528,8 @@ func (s *Server) checkAndAutoPeaceDesktop(ctx context.Context) {
 		s.takeoverMu.Unlock()
 		return
 	}
-	s.lastTakeover = time.Now()
 	if !cfg.Identity.AutoPeaceDesktop {
+		s.lastTakeover = now
 		for _, pid := range newExposed {
 			s.preExistingPIDs[pid] = true
 		}
@@ -356,9 +537,15 @@ func (s *Server) checkAndAutoPeaceDesktop(ctx context.Context) {
 		s.warnUnisolatedDesktop(newExposed)
 		return
 	}
+	if !s.allowAutoPeaceTrigger(now) {
+		s.takeoverMu.Unlock()
+		return
+	}
+	s.lastTakeover = now
 	s.takeoverMu.Unlock()
 
-	s.executeTakeover(ctx, &cfg, newExposed, "auto-peace")
+	_, _, blocked, err := s.executeTakeover(ctx, &cfg, newExposed, "auto-peace")
+	s.recordAutoPeaceOutcome(time.Now(), err != nil || blocked != "")
 }
 
 func (s *Server) warnUnisolatedDesktop(pids []string) {
@@ -374,7 +561,7 @@ func (s *Server) warnUnisolatedDesktop(pids []string) {
 	}
 	msg := fmt.Sprintf("检测到直接打开了未隔离的原生 Claude.app (PID %s)，可能绕过静态 IP 直连 Anthropic！\n\n点击「立即切换安全模式」将自动关闭原生窗口并用 PeaceClaude 隔离重新打开。", strings.Join(pids, ", "))
 	script := fmt.Sprintf(`set choice to button returned of (display alert "PeaceClaude 安全警告" message "%s" as warning buttons {"暂时忽略", "立即切换安全模式"} default button "立即切换安全模式")
-return choice`, strings.ReplaceAll(msg, `"`, `'`))
+return choice`, launcher.EscapeAppleScript(msg))
 	go func() {
 		out, err := exec.Command("/usr/bin/osascript", "-e", script).Output()
 		if err == nil && strings.Contains(string(out), "立即切换安全模式") {
@@ -385,22 +572,43 @@ return choice`, strings.ReplaceAll(msg, `"`, `'`))
 	}()
 }
 
-// TakeoverAllExposed terminates ALL running unisolated Claude.app instances (including pre-existing ones)
-// and relaunches Claude Desktop in isolated PeaceClaude mode if Egress Gate is OPEN.
+func isOwnedUnisolatedTarget(p host.DesktopProcAudit, ownProfilesDir string) bool {
+	if isAutoPeaceTarget(p) {
+		return true
+	}
+	if p.Isolated {
+		return false
+	}
+	raw := p.RawCommand
+	if raw == "" {
+		raw = p.Command
+	}
+	dataDir := launcher.ExtractUserDataDir(raw)
+	if dataDir == "" {
+		return false
+	}
+	cleanOwn := filepath.Clean(ownProfilesDir)
+	return dataDir == cleanOwn || strings.HasPrefix(dataDir, cleanOwn+string(filepath.Separator))
+}
+
+// TakeoverAllExposed terminates unisolated native Claude.app instances (and malformed own-profile
+// instances, never foreign test sandboxes) and relaunches Claude Desktop in isolated mode if Egress Gate is OPEN.
 func (s *Server) TakeoverAllExposed(ctx context.Context) (terminated int, relaunchedPID int, blockedReason string, err error) {
-	s.mu.RLock()
-	cfg := *s.cfg
-	s.mu.RUnlock()
+	cfg := s.configSnapshot()
 	rep := host.InspectRunningDesktop(&cfg)
+	ownProfiles := config.ProfilesDir()
 	var exposed []string
 	for _, p := range rep.Processes {
-		if !p.Isolated {
+		if isOwnedUnisolatedTarget(p, ownProfiles) {
 			exposed = append(exposed, p.PID)
 		}
 	}
 	s.takeoverMu.Lock()
 	s.preExistingPIDs = map[string]bool{}
 	s.lastTakeover = time.Now()
+	s.takeoverAttempts = nil
+	s.takeoverConsecFails = 0
+	s.autoPeacePausedUntil = time.Time{}
 	s.takeoverMu.Unlock()
 
 	terminated, relaunchedPID, blockedReason, err = s.executeTakeover(ctx, &cfg, exposed, "manual-takeover")
@@ -408,7 +616,32 @@ func (s *Server) TakeoverAllExposed(ctx context.Context) (terminated int, relaun
 }
 
 func (s *Server) executeTakeover(ctx context.Context, cfg *config.Config, pids []string, trigger string) (terminated int, relaunchedPID int, blockedReason string, err error) {
+	// Harvest any claude:// deep-link URLs passed on the unisolated cold-start command line
+	// before terminating it so login/deep-link navigation forwards cleanly into the isolated instance.
+	var deepLinks []string
 	if len(pids) > 0 {
+		pidSet := make(map[string]bool, len(pids))
+		for _, pid := range pids {
+			pidSet[pid] = true
+		}
+		seenURL := map[string]bool{}
+		rep := host.InspectRunningDesktop(cfg)
+		for _, proc := range rep.Processes {
+			if !pidSet[proc.PID] {
+				continue
+			}
+			raw := proc.RawCommand
+			if raw == "" {
+				raw = proc.Command
+			}
+			for _, u := range launcher.ExtractClaudeDeepLinkArgs(raw) {
+				if !seenURL[u] {
+					seenURL[u] = true
+					deepLinks = append(deepLinks, u)
+				}
+			}
+		}
+
 		terminated = launcher.TerminatePIDs(pids, 4*time.Second)
 		s.audit.RecordLeak(audit.LeakEvent{
 			Kind:    "auto_peace_takeover",
@@ -431,14 +664,17 @@ func (s *Server) executeTakeover(ctx context.Context, cfg *config.Config, pids [
 		return terminated, 0, blockedReason, nil
 	}
 
-	spec, pid, launchErr := launcher.LaunchDesktop(ctx, cfg, s.selfBin, cfg.ActiveProfile, nil, false)
+	spec, pid, _, launchErr := launcher.LaunchDesktopWithOptions(ctx, cfg, s.selfBin, cfg.ActiveProfile, launcher.DesktopLaunchOptions{
+		ExtraArgs:       deepLinks,
+		ExclusiveSwitch: cfg.Identity.SingleActiveDesktop,
+	})
 	if launchErr != nil {
 		log.Printf("[auto-peace] relaunch isolated Claude Desktop failed: %v", launchErr)
 		s.notifyMacOS("PeaceClaude 接管失败", launchErr.Error())
 		return terminated, 0, "", launchErr
 	}
-	log.Printf("[auto-peace] %s succeeded: terminated=%d, relaunched isolated Claude Desktop PID=%d profile=%s",
-		trigger, terminated, pid, spec.Profile)
+	log.Printf("[auto-peace] %s succeeded: terminated=%d, relaunched isolated Claude Desktop PID=%d profile=%s deepLinks=%d",
+		trigger, terminated, pid, spec.Profile, len(deepLinks))
 	s.notifyMacOS("PeaceClaude 已自动接管", fmt.Sprintf("已将误点的原生 Claude.app 切入安全隔离模式 (档案 %s · 出口 %s)",
 		spec.Profile, s.gate.Snapshot().LastGood.EgressIP))
 	return terminated, pid, "", nil
@@ -455,8 +691,8 @@ func (s *Server) notifyMacOS(title, body string) {
 	}
 	s.lastNotify = time.Now()
 	s.notifyMu.Unlock()
-	safeTitle := strings.ReplaceAll(title, `"`, `'`)
-	safeBody := strings.ReplaceAll(body, `"`, `'`)
+	safeTitle := launcher.EscapeAppleScript(title)
+	safeBody := launcher.EscapeAppleScript(body)
 	go func() {
 		_ = exec.Command("/usr/bin/osascript", "-e",
 			fmt.Sprintf(`display notification "%s" with title "%s"`, safeBody, safeTitle)).Run()
