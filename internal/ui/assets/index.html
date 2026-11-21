@@ -842,9 +842,19 @@
             <div class="card-head">
               <div>
                 <h2>隔离边界与桌面切号策略</h2>
-                <p class="muted">控制身份时区语言、单活窗口切号与 Auto-Peace 自动接管行为</p>
+                <p class="muted">控制开机自启守护、身份时区语言、单活窗口切号与 Auto-Peace 自动接管行为</p>
               </div>
               <button type="submit" class="btn btn-primary btn-sm">保存策略设置</button>
+            </div>
+            <div class="pac-row" style="margin-bottom:16px;">
+              <div>
+                <div class="check-title">开机自启后台守护（LaunchAgent 幂等注册）</div>
+                <p class="muted" id="autostart-status-desc">打开 PeaceClaude.app 时自动检查并幂等注册 com.peaceclaude.daemon（已有则跳过）；防止重启后 Claude.app 漏代理直连。</p>
+              </div>
+              <div class="btn-row">
+                <span class="status-tag" id="autostart-status-tag">--</span>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-autostart">切换开机自启</button>
+              </div>
             </div>
             <div class="settings-grid" style="margin-bottom:16px;">
               <div class="field">
@@ -959,6 +969,7 @@
               <div><h3>3. 安全门禁与 PAC 接管</h3><p class="muted">控制守护进程、浏览器 PAC 分流、紧急熔断与内核 pf 防护</p></div>
             </div>
             <div class="cli-cmd-line"><code>peaceclaude service restart</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude service restart" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude service ensure-autostart</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude service ensure-autostart" type="button">复制</button></div>
             <div class="cli-cmd-line"><code>peaceclaude browser-pac status</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude browser-pac status" type="button">复制</button></div>
             <div class="cli-cmd-line"><code>peaceclaude browser-shield status</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude browser-shield status" type="button">复制</button></div>
             <div class="cli-cmd-line"><code>peaceclaude lock "manual check"</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude lock" type="button">复制</button></div>

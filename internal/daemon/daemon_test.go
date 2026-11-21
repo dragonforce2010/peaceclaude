@@ -546,3 +546,94 @@ func newResponseRecorder() *simpleRecorder {
 func (r *simpleRecorder) Header() http.Header         { return r.header }
 func (r *simpleRecorder) Write(b []byte) (int, error) { return r.body.Write(b) }
 func (r *simpleRecorder) WriteHeader(statusCode int)  { r.code = statusCode }
+
+func TestParseBootTimeAndBootGraceExemption(t *testing.T) {
+	sec, ok := parseBootTimeSec("{ sec = 1795279619, usec = 805208 } Sun Nov 22 00:46:59 2026\n")
+	if !ok || sec != 1795279619 {
+		t.Fatalf("parseBootTimeSec failed: sec=%d ok=%t", sec, ok)
+	}
+	if _, badOK := parseBootTimeSec("invalid output"); badOK {
+		t.Fatal("expected parseBootTimeSec to reject malformed string")
+	}
+
+	cases := []struct {
+		name     string
+		auto     bool
+		uptime   time.Duration
+		known    bool
+		wantEx   bool
+	}{
+		{"disabled_auto_peace_always_exempt", false, 30 * time.Second, true, true},
+		{"just_booted_within_grace_never_exempt", true, 45 * time.Second, true, false},
+		{"edge_3m_still_takes_over", true, 3 * time.Minute, true, false},
+		{"mid_session_long_uptime_exempt", true, 2 * time.Hour, true, true},
+		{"unknown_uptime_falls_back_to_safe_exempt", true, 0, false, true},
+	}
+	for _, tc := range cases {
+		if got := shouldExemptPreExistingDesktop(tc.auto, tc.uptime, tc.known); got != tc.wantEx {
+			t.Fatalf("%s: shouldExemptPreExistingDesktop(%t, %v, %t) = %t, want %t",
+				tc.name, tc.auto, tc.uptime, tc.known, got, tc.wantEx)
+		}
+	}
+}
+
+func TestServiceAutostartAPI(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_NO_LAUNCHD", "1")
+	srv := New(config.Default(), "/usr/bin/true")
+
+	// 1. /api/status must include service status object with auto_start_enabled=true by default.
+	reqStatus, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/api/status", nil)
+	rrStatus := newResponseRecorder()
+	srv.handleStatus(rrStatus, reqStatus)
+	if rrStatus.code != http.StatusOK {
+		t.Fatalf("/api/status HTTP %d: %s", rrStatus.code, rrStatus.body.String())
+	}
+	var stBody struct {
+		Service struct {
+			Running          bool `json:"running"`
+			AutoStartEnabled bool `json:"auto_start_enabled"`
+		} `json:"service"`
+	}
+	if err := json.Unmarshal(rrStatus.body.Bytes(), &stBody); err != nil {
+		t.Fatal(err)
+	}
+	if !stBody.Service.Running || !stBody.Service.AutoStartEnabled {
+		t.Fatalf("unexpected service status in /api/status: %+v", stBody.Service)
+	}
+
+	// 2. Missing enabled boolean -> 400.
+	reqBad, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/service/autostart", bytes.NewBufferString(`{}`))
+	reqBad.Header.Set("Origin", "http://127.0.0.1")
+	rrBad := newResponseRecorder()
+	srv.withCSRF(srv.handleServiceAutostart)(rrBad, reqBad)
+	if rrBad.code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when enabled omitted, got %d", rrBad.code)
+	}
+
+	// 3. Toggle disabled -> persists false in config without touching host LaunchAgent in sandbox.
+	reqOff, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/service/autostart", bytes.NewBufferString(`{"enabled":false}`))
+	reqOff.Header.Set("Origin", "http://127.0.0.1")
+	rrOff := newResponseRecorder()
+	srv.withCSRF(srv.handleServiceAutostart)(rrOff, reqOff)
+	if rrOff.code != http.StatusOK {
+		t.Fatalf("disable autostart HTTP %d: %s", rrOff.code, rrOff.body.String())
+	}
+	snapOff := srv.configSnapshot()
+	if snapOff.ShouldAutoStartLaunchAgent() {
+		t.Fatal("expected ShouldAutoStartLaunchAgent=false after disabling via API")
+	}
+
+	// 4. Toggle enabled back -> persists true.
+	reqOn, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/service/autostart", bytes.NewBufferString(`{"enabled":true}`))
+	reqOn.Header.Set("Origin", "http://127.0.0.1")
+	rrOn := newResponseRecorder()
+	srv.withCSRF(srv.handleServiceAutostart)(rrOn, reqOn)
+	if rrOn.code != http.StatusOK {
+		t.Fatalf("enable autostart HTTP %d: %s", rrOn.code, rrOn.body.String())
+	}
+	snapOn := srv.configSnapshot()
+	if !snapOn.ShouldAutoStartLaunchAgent() {
+		t.Fatal("expected ShouldAutoStartLaunchAgent=true after enabling via API")
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -407,12 +408,85 @@ func (s *Server) currentDirectHits() []host.DirectSocketHit {
 	return append([]host.DirectSocketHit(nil), s.directHits...)
 }
 
+const bootTakeoverGraceWindow = 3 * time.Minute
+
+// parseBootTimeSec parses the integer epoch seconds from `sysctl -n kern.boottime`,
+// e.g. "{ sec = 1795279619, usec = 805208 } Sun Nov 22 00:46:59 2026".
+func parseBootTimeSec(raw string) (int64, bool) {
+	idx := strings.Index(raw, "sec")
+	if idx < 0 {
+		return 0, false
+	}
+	rest := raw[idx+len("sec"):]
+	eq := strings.IndexByte(rest, '=')
+	if eq < 0 {
+		return 0, false
+	}
+	rest = strings.TrimSpace(rest[eq+1:])
+	end := strings.IndexAny(rest, ",} \t\r\n")
+	if end >= 0 {
+		rest = rest[:end]
+	}
+	sec, err := strconv.ParseInt(strings.TrimSpace(rest), 10, 64)
+	if err != nil || sec <= 0 {
+		return 0, false
+	}
+	return sec, true
+}
+
+func readSystemUptime() (time.Duration, bool) {
+	if runtime.GOOS != "darwin" {
+		return 0, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "sysctl", "-n", "kern.boottime").Output()
+	if err != nil {
+		return 0, false
+	}
+	sec, ok := parseBootTimeSec(string(out))
+	if !ok {
+		return 0, false
+	}
+	return time.Since(time.Unix(sec, 0)), true
+}
+
+func shouldExemptPreExistingDesktop(autoPeaceEnabled bool, systemUptime time.Duration, uptimeKnown bool) bool {
+	if !autoPeaceEnabled {
+		return true
+	}
+	if uptimeKnown && systemUptime >= 0 && systemUptime <= bootTakeoverGraceWindow {
+		// Within 3 minutes of system boot, never exempt unisolated native Claude.app instances
+		// restored by macOS Login Window before PeaceClaude LaunchAgent started.
+		return false
+	}
+	return true
+}
+
 func (s *Server) snapshotPreExistingDesktop() {
 	s.mu.RLock()
 	cfg := *s.cfg
 	s.mu.RUnlock()
 	rep := host.InspectRunningDesktop(&cfg)
+	uptime, uptimeOK := readSystemUptime()
+	exempt := shouldExemptPreExistingDesktop(cfg.Identity.AutoPeaceDesktop, uptime, uptimeOK)
+
 	s.takeoverMu.Lock()
+	if !exempt {
+		s.preExistingPIDs = map[string]bool{}
+		s.takeoverMu.Unlock()
+		var bareCount int
+		for _, p := range rep.Processes {
+			if isAutoPeaceTarget(p) {
+				bareCount++
+			}
+		}
+		if bareCount > 0 {
+			log.Printf("[auto-peace] boot grace window (uptime=%s): %d pre-existing unisolated Claude.app process(es) will be taken over",
+				uptime.Round(time.Second), bareCount)
+		}
+		return
+	}
 	s.preExistingPIDs = make(map[string]bool, len(rep.Processes))
 	for _, p := range rep.Processes {
 		if !p.Isolated {
@@ -687,8 +761,18 @@ func (s *Server) executeTakeover(ctx context.Context, cfg *config.Config, pids [
 		})
 	}
 
-	// Verify Egress Gate before relaunching; never relaunch while fail-closed locked.
+	// Verify Egress Gate before relaunching; if daemon just booted and initial probe hasn't finished,
+	// perform one immediate probe before enforcing Fail-Closed block.
 	gateOpen, lockReason := s.gate.AllowTraffic()
+	if !gateOpen && cfg.Egress.FailClosed {
+		snap := s.gate.Snapshot()
+		if !snap.ManualLock && snap.LastProbe.CheckedAt.IsZero() {
+			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			_ = s.gate.Check(probeCtx, false)
+			cancel()
+			gateOpen, lockReason = s.gate.AllowTraffic()
+		}
+	}
 	if !gateOpen && cfg.Egress.FailClosed {
 		blockedReason = lockReason
 		if blockedReason == "" {

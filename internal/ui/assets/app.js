@@ -507,6 +507,7 @@
     renderVMProxy(s.vm_proxy);
     renderRules(s.rules);
     renderPACStatus(s.browser_pac);
+    renderServiceAutostart(s.service);
     renderStorageInfo(s.storage);
     populateSettings(s.config);
 
@@ -533,6 +534,37 @@
     }
     $('pac-status-desc').textContent = pac.note || '';
     $('account-pac-warn')?.classList.toggle('hidden', pacEnabled);
+  }
+
+  let autostartPolicyEnabled = true;
+  function renderServiceAutostart(svc) {
+    if (!svc) return;
+    autostartPolicyEnabled = svc.auto_start_enabled !== false;
+    const tag = $('autostart-status-tag');
+    const desc = $('autostart-status-desc');
+    const btn = $('btn-toggle-autostart');
+    if (!tag || !desc || !btn) return;
+    if (!autostartPolicyEnabled) {
+      tag.className = 'status-tag';
+      tag.textContent = '已关闭';
+      desc.textContent = `开机自启策略已关闭（${svc.launch_agent_path || '~/Library/LaunchAgents/com.peaceclaude.daemon.plist'}），当前守护进程运行于 PID ${svc.pid || '—'}。`;
+      btn.textContent = '开启开机自启';
+      return;
+    }
+    if (svc.launch_agent_installed && svc.launch_agent_valid && svc.launch_agent_loaded) {
+      tag.className = 'status-tag pass';
+      tag.textContent = '已注册开机自启';
+      desc.textContent = `com.peaceclaude.daemon 已注册并由 launchd 托管 (PID ${svc.pid || '—'} · ${svc.launch_agent_binary || svc.launch_agent_path || ''})。`;
+    } else if (svc.launch_agent_installed && svc.launch_agent_valid) {
+      tag.className = 'status-tag warn';
+      tag.textContent = '待激活托管';
+      desc.textContent = `已写入开机项 plist（${svc.launch_agent_path || ''}），将在下次启动 PeaceClaude.app 或运行 peaceclaude service ensure-autostart 时接入 launchd。`;
+    } else {
+      tag.className = 'status-tag warn';
+      tag.textContent = '未注册开机项';
+      desc.textContent = `检测到尚未注册或失效的 LaunchAgent（${svc.launch_agent_path || ''}）；点击右侧或打开 PeaceClaude.app 将自动补齐注册。`;
+    }
+    btn.textContent = '关闭开机自启';
   }
 
   function renderStorageInfo(st) {
@@ -1883,6 +1915,13 @@
     } else {
       toast(pac.matches_peaceclaude ? '关闭 PAC 后仍生效，请检查系统网络' : '已关闭系统浏览器 PAC', pac.matches_peaceclaude ? 'warn' : 'ok');
     }
+  }));
+  $('btn-toggle-autostart')?.addEventListener('click', () => withBtnBusy($('btn-toggle-autostart'), '处理中…', async () => {
+    const want = !autostartPolicyEnabled;
+    const res = await api('/api/service/autostart', { method: 'POST', body: JSON.stringify({ enabled: want }) });
+    if (res.service) renderServiceAutostart(res.service);
+    await refreshAll();
+    toast(res.message || (want ? '已开启开机自启守护' : '已关闭开机自启守护'), 'ok');
   }));
 
   // Native Browser Multi-Select Protection Events

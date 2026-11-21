@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -22,14 +23,43 @@ import (
 const LaunchAgentLabel = "com.peaceclaude.daemon"
 
 type ServiceStatus struct {
+	Running           bool   `json:"running"`
+	PID               int    `json:"pid,omitempty"`
+	LaunchAgentPath   string `json:"launch_agent_path"`
+	LaunchAgentSet    bool   `json:"launch_agent_installed"`
+	LaunchAgentLoaded bool   `json:"launch_agent_loaded"`
+	LaunchAgentValid  bool   `json:"launch_agent_valid"`
+	LaunchAgentBinary string `json:"launch_agent_binary,omitempty"`
+	AutoStartEnabled  bool   `json:"auto_start_enabled"`
+	ControlURL        string `json:"control_url"`
+	HTTPProxyURL      string `json:"http_proxy_url"`
+	SOCKS5ProxyURL    string `json:"socks5_proxy_url"`
+	Error             string `json:"error,omitempty"`
+}
+
+type EnsureLaunchAgentResult struct {
+	Action          string `json:"action"` // skipped | installed | repaired | restarted | disabled | disabled_in_sandbox | skipped_ephemeral_binary
+	Installed       bool   `json:"installed"`
+	Loaded          bool   `json:"loaded"`
 	Running         bool   `json:"running"`
 	PID             int    `json:"pid,omitempty"`
 	LaunchAgentPath string `json:"launch_agent_path"`
-	LaunchAgentSet  bool   `json:"launch_agent_installed"`
-	ControlURL      string `json:"control_url"`
-	HTTPProxyURL    string `json:"http_proxy_url"`
-	SOCKS5ProxyURL  string `json:"socks5_proxy_url"`
-	Error           string `json:"error,omitempty"`
+	BinaryPath      string `json:"binary_path,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+}
+
+type launchAgentOps struct {
+	canManage   bool
+	plistPath   string
+	readFile    func(string) ([]byte, error)
+	isExec      func(string) bool
+	isLoaded    func() bool
+	isHealthy   func() (bool, int)
+	resolveBin  func(string) (string, bool)
+	installFile func(string) (string, error)
+	stopBare    func()
+	startLaunch func(plist string) error
+	waitHealthy func() (bool, int)
 }
 
 func LaunchAgentPath() string {
@@ -37,7 +67,125 @@ func LaunchAgentPath() string {
 	return filepath.Join(home, "Library/LaunchAgents", LaunchAgentLabel+".plist")
 }
 
+func canManageHostLaunchAgent() bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	if os.Getenv("PEACECLAUDE_NO_LAUNCHD") == "1" {
+		return false
+	}
+	if strings.TrimSpace(os.Getenv("PEACECLAUDE_HOME")) != "" && os.Getenv("PEACECLAUDE_FORCE_LAUNCHD") != "1" {
+		return false
+	}
+	return true
+}
+
+// CanManageHostLaunchAgent reports whether this process is allowed to inspect
+// and mutate host macOS LaunchAgents (always false in tests/sandboxes or non-darwin OS).
+func CanManageHostLaunchAgent() bool {
+	return canManageHostLaunchAgent()
+}
+
+func xmlEscapePlist(s string) string {
+	repl := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+	return repl.Replace(s)
+}
+
+// ParseLaunchAgentProgram extracts the executable path (first element) from
+// <key>ProgramArguments</key><array><string>...</string>...</array>.
+func ParseLaunchAgentProgram(plistContent string) string {
+	keyIdx := strings.Index(plistContent, "<key>ProgramArguments</key>")
+	if keyIdx < 0 {
+		return ""
+	}
+	rest := plistContent[keyIdx:]
+	arrStart := strings.Index(rest, "<array>")
+	arrEnd := strings.Index(rest, "</array>")
+	if arrStart < 0 || arrEnd < 0 || arrEnd <= arrStart {
+		return ""
+	}
+	arr := rest[arrStart:arrEnd]
+	sStart := strings.Index(arr, "<string>")
+	if sStart < 0 {
+		return ""
+	}
+	after := arr[sStart+len("<string>"):]
+	sEnd := strings.Index(after, "</string>")
+	if sEnd < 0 {
+		return ""
+	}
+	prog := strings.TrimSpace(after[:sEnd])
+	prog = strings.NewReplacer("&amp;", "&", "&lt;", "<", "&gt;", ">").Replace(prog)
+	return prog
+}
+
+func isRegularExecutable(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	return fi.Mode()&0o111 != 0
+}
+
+// ValidateLaunchAgentPlist verifies structural validity and checks that the referenced binary exists and is executable.
+func ValidateLaunchAgentPlist(plistContent string, isExec func(string) bool) (string, bool) {
+	if isExec == nil {
+		isExec = isRegularExecutable
+	}
+	bin := ParseLaunchAgentProgram(plistContent)
+	if bin == "" || !isExec(bin) {
+		return bin, false
+	}
+	for _, req := range []string{"<string>service</string>", "<string>run</string>", "<key>RunAtLoad</key>", "<key>KeepAlive</key>"} {
+		if !strings.Contains(plistContent, req) {
+			return bin, false
+		}
+	}
+	return bin, true
+}
+
+func isLaunchAgentLoaded(uid string) bool {
+	if runtime.GOOS != "darwin" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, "launchctl", "print", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run() == nil
+}
+
+func resolveLaunchAgentBinary(binPath string) (string, bool) {
+	isEphemeral := func(p string) bool {
+		clean := filepath.Clean(p)
+		return strings.HasPrefix(clean, "/Volumes/") || strings.Contains(clean, "/AppTranslocation/")
+	}
+	clean := filepath.Clean(strings.TrimSpace(binPath))
+	if clean != "" && !isEphemeral(clean) && isRegularExecutable(clean) {
+		return clean, false
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".local/bin/peaceclaude"),
+		"/opt/homebrew/bin/peaceclaude",
+		"/usr/local/bin/peaceclaude",
+		"/Applications/PeaceClaude.app/Contents/Resources/bin/peaceclaude",
+		filepath.Join(home, "Applications/PeaceClaude.app/Contents/Resources/bin/peaceclaude"),
+	}
+	for _, cand := range candidates {
+		if !isEphemeral(cand) && isRegularExecutable(cand) {
+			return cand, false
+		}
+	}
+	if clean != "" && isEphemeral(clean) {
+		return "", true
+	}
+	return clean, false
+}
+
 func RenderLaunchAgentPlist(binPath string) string {
+	home, _ := os.UserHomeDir()
 	logPath := config.DaemonLogPath()
 	errPath := filepath.Join(config.LogsDir(), "daemon.err.log")
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -58,6 +206,8 @@ func RenderLaunchAgentPlist(binPath string) string {
   <true/>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key>
+    <string>%s</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
@@ -67,7 +217,7 @@ func RenderLaunchAgentPlist(binPath string) string {
   <string>%s</string>
 </dict>
 </plist>
-`, LaunchAgentLabel, binPath, logPath, errPath)
+`, LaunchAgentLabel, xmlEscapePlist(binPath), xmlEscapePlist(home), xmlEscapePlist(logPath), xmlEscapePlist(errPath))
 }
 
 func DaemonHealth(cfg *config.Config) (bool, int) {
@@ -90,24 +240,59 @@ func DaemonHealth(cfg *config.Config) (bool, int) {
 	return out.OK, out.PID
 }
 
-func GetServiceStatus(cfg *config.Config) ServiceStatus {
-	running, pid := DaemonHealth(cfg)
+// InspectLaunchAgentStatus inspects LaunchAgent installation, validity and launchd state
+// without making any self-referential HTTP calls, so /api/status inside daemon can call it safely.
+func InspectLaunchAgentStatus(cfg *config.Config, running bool, pid int) ServiceStatus {
 	plist := LaunchAgentPath()
-	_, err := os.Stat(plist)
+	autoEnabled := cfg.ShouldAutoStartLaunchAgent()
+	var (
+		installed bool
+		valid     bool
+		loaded    bool
+		binPath   string
+	)
+	if canManageHostLaunchAgent() {
+		if raw, err := os.ReadFile(plist); err == nil {
+			installed = true
+			binPath, valid = ValidateLaunchAgentPlist(string(raw), isRegularExecutable)
+		}
+		loaded = isLaunchAgentLoaded(strconv.Itoa(os.Getuid()))
+	}
 	return ServiceStatus{
-		Running:         running,
-		PID:             pid,
-		LaunchAgentPath: plist,
-		LaunchAgentSet:  err == nil,
-		ControlURL:      cfg.ControlURL(),
-		HTTPProxyURL:    cfg.HTTPProxyURL(),
-		SOCKS5ProxyURL:  cfg.SOCKS5ProxyURL(),
+		Running:           running,
+		PID:               pid,
+		LaunchAgentPath:   plist,
+		LaunchAgentSet:    installed,
+		LaunchAgentLoaded: loaded,
+		LaunchAgentValid:  valid,
+		LaunchAgentBinary: binPath,
+		AutoStartEnabled:  autoEnabled,
+		ControlURL:        cfg.ControlURL(),
+		HTTPProxyURL:      cfg.HTTPProxyURL(),
+		SOCKS5ProxyURL:    cfg.SOCKS5ProxyURL(),
 	}
 }
 
+func GetServiceStatus(cfg *config.Config) ServiceStatus {
+	running, pid := DaemonHealth(cfg)
+	return InspectLaunchAgentStatus(cfg, running, pid)
+}
+
 func InstallLaunchAgent(binPath string) (string, error) {
+	if !canManageHostLaunchAgent() {
+		return LaunchAgentPath(), nil
+	}
+	return InstallLaunchAgentPlistOnly(binPath)
+}
+
+// InstallLaunchAgentPlistOnly writes the LaunchAgent plist cleanly without restarting the active daemon.
+func InstallLaunchAgentPlistOnly(binPath string) (string, error) {
 	if err := config.EnsureDirs(); err != nil {
 		return "", err
+	}
+	resolved, ephemeral := resolveLaunchAgentBinary(binPath)
+	if !ephemeral && resolved != "" {
+		binPath = resolved
 	}
 	plist := LaunchAgentPath()
 	if err := os.MkdirAll(filepath.Dir(plist), 0o755); err != nil {
@@ -119,31 +304,187 @@ func InstallLaunchAgent(binPath string) (string, error) {
 	return plist, nil
 }
 
-func StartService(cfg *config.Config, binPath string, useLaunchd bool) error {
-	if ok, _ := DaemonHealth(cfg); ok {
+// DisableLaunchAgentAutostart removes the host LaunchAgent plist so future logins do not auto-start,
+// without killing the currently running daemon serving the Web UI HTTP request.
+func DisableLaunchAgentAutostart() error {
+	if !canManageHostLaunchAgent() {
 		return nil
 	}
-	if err := config.EnsureDirs(); err != nil {
+	plist := LaunchAgentPath()
+	if err := os.Remove(plist); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	return nil
+}
 
-	if useLaunchd {
-		plist, err := InstallLaunchAgent(binPath)
-		if err == nil {
-			uid := strconv.Itoa(os.Getuid())
-			_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
-			if err := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%s", uid), plist).Run(); err == nil {
-				_ = exec.Command("launchctl", "kickstart", "-k", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
-				if waitForDaemon(cfg, 8*time.Second) {
-					return nil
-				}
-				// Prevent KeepAlive LaunchAgent from fighting with the detached fallback daemon.
-				_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
-			}
+func stopBareDaemonForHandoff(cfg *config.Config) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, _ := http.NewRequest(http.MethodPost, cfg.ControlURL()+"/api/shutdown", nil)
+	_, _ = client.Do(req)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if ok, _ := DaemonHealth(cfg); !ok {
+			_ = os.Remove(config.DaemonPIDPath())
+			return
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if raw, err := os.ReadFile(config.DaemonPIDPath()); err == nil {
+		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 1 {
+			_ = syscall.Kill(pid, syscall.SIGTERM)
+			time.Sleep(300 * time.Millisecond)
 		}
 	}
+	_ = os.Remove(config.DaemonPIDPath())
+}
 
-	// Fallback: spawn detached daemon process directly (works cleanly in tests & non-launchd sessions).
+func defaultLaunchAgentOps(cfg *config.Config) launchAgentOps {
+	uid := strconv.Itoa(os.Getuid())
+	return launchAgentOps{
+		canManage:  canManageHostLaunchAgent(),
+		plistPath:  LaunchAgentPath(),
+		readFile:   os.ReadFile,
+		isExec:     isRegularExecutable,
+		isLoaded:   func() bool { return isLaunchAgentLoaded(uid) },
+		isHealthy:  func() (bool, int) { return DaemonHealth(cfg) },
+		resolveBin: resolveLaunchAgentBinary,
+		installFile: func(bin string) (string, error) {
+			return InstallLaunchAgentPlistOnly(bin)
+		},
+		stopBare: func() { stopBareDaemonForHandoff(cfg) },
+		startLaunch: func(plist string) error {
+			_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
+			if err := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%s", uid), plist).Run(); err != nil {
+				return err
+			}
+			_ = exec.Command("launchctl", "kickstart", "-k", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
+			if !waitForDaemon(cfg, 8*time.Second) {
+				// Prevent KeepAlive LaunchAgent from fighting with any detached fallback daemon.
+				_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
+				return fmt.Errorf("launchd started agent but control API %s did not respond", cfg.ControlURL())
+			}
+			return nil
+		},
+		waitHealthy: func() (bool, int) {
+			return DaemonHealth(cfg)
+		},
+	}
+}
+
+func ensureLaunchAgentWithOps(cfg *config.Config, binPath string, respectConfig bool, ops launchAgentOps) (EnsureLaunchAgentResult, error) {
+	res := EnsureLaunchAgentResult{
+		LaunchAgentPath: ops.plistPath,
+	}
+	if !ops.canManage {
+		running, pid := ops.isHealthy()
+		res.Action = "disabled_in_sandbox"
+		res.Running = running
+		res.PID = pid
+		res.Reason = "sandbox or non-macOS environment; host LaunchAgent untouched"
+		return res, nil
+	}
+	if respectConfig && !cfg.ShouldAutoStartLaunchAgent() {
+		running, pid := ops.isHealthy()
+		res.Action = "disabled"
+		res.Running = running
+		res.PID = pid
+		res.Reason = "auto_start_launch_agent=false"
+		return res, nil
+	}
+
+	raw, err := ops.readFile(ops.plistPath)
+	plistExists := err == nil
+	var plistBin string
+	var plistValid bool
+	if plistExists {
+		plistBin, plistValid = ValidateLaunchAgentPlist(string(raw), ops.isExec)
+	}
+	loaded := ops.isLoaded()
+	running, pid := ops.isHealthy()
+
+	// Fast idempotent skip path: valid plist exists, loaded in launchd, and daemon healthy.
+	if plistExists && plistValid && loaded && running {
+		res.Action = "skipped"
+		res.Installed = true
+		res.Loaded = true
+		res.Running = true
+		res.PID = pid
+		res.BinaryPath = plistBin
+		res.Reason = "LaunchAgent 已注册且守护进程运行中"
+		return res, nil
+	}
+
+	var targetBin string
+	if plistValid && plistBin != "" {
+		// Preserve existing valid binary path to avoid thrashing between ~/.local/bin and .app bundle.
+		targetBin = plistBin
+	} else {
+		resolved, ephemeral := ops.resolveBin(binPath)
+		if ephemeral || resolved == "" {
+			res.Action = "skipped_ephemeral_binary"
+			res.Installed = plistExists
+			res.Loaded = loaded
+			res.Running = running
+			res.PID = pid
+			res.Reason = "running from read-only volume or AppTranslocation without installed stable binary"
+			return res, nil
+		}
+		targetBin = resolved
+	}
+	res.BinaryPath = targetBin
+
+	action := "restarted"
+	if !plistExists {
+		action = "installed"
+	} else if !plistValid {
+		action = "repaired"
+	}
+
+	needWrite := !plistExists || !plistValid
+	plistPath := ops.plistPath
+	if needWrite {
+		p, werr := ops.installFile(targetBin)
+		if werr != nil {
+			return res, werr
+		}
+		if p != "" {
+			plistPath = p
+		}
+	}
+	res.LaunchAgentPath = plistPath
+	res.Installed = true
+
+	// If an un-managed daemon is currently holding the proxy/control ports, hand off cleanly
+	// before calling launchctl bootstrap so the LaunchAgent never hits EADDRINUSE.
+	if running && !loaded && ops.stopBare != nil {
+		ops.stopBare()
+	}
+
+	if err := ops.startLaunch(plistPath); err != nil {
+		res.Action = action
+		res.Loaded = ops.isLoaded()
+		r2, p2 := ops.waitHealthy()
+		res.Running = r2
+		res.PID = p2
+		return res, err
+	}
+
+	r2, p2 := ops.waitHealthy()
+	res.Action = action
+	res.Loaded = true
+	res.Running = r2
+	res.PID = p2
+	return res, nil
+}
+
+// EnsureLaunchAgent idempotently checks LaunchAgent registration & daemon health on macOS,
+// installing/repairing/restarting as needed or returning Action="skipped" when already healthy.
+func EnsureLaunchAgent(cfg *config.Config, binPath string, respectConfig bool) (EnsureLaunchAgentResult, error) {
+	return ensureLaunchAgentWithOps(cfg, binPath, respectConfig, defaultLaunchAgentOps(cfg))
+}
+
+func startDetachedDaemon(cfg *config.Config, binPath string) error {
 	logFile, err := os.OpenFile(config.DaemonLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
@@ -166,11 +507,38 @@ func StartService(cfg *config.Config, binPath string, useLaunchd bool) error {
 	return nil
 }
 
+func StartService(cfg *config.Config, binPath string, useLaunchd bool) error {
+	if useLaunchd && canManageHostLaunchAgent() {
+		if err := config.EnsureDirs(); err != nil {
+			return err
+		}
+		res, err := EnsureLaunchAgent(cfg, binPath, false)
+		if err == nil && res.Running {
+			return nil
+		}
+		if ok, _ := DaemonHealth(cfg); ok {
+			return nil
+		}
+	} else {
+		if ok, _ := DaemonHealth(cfg); ok {
+			return nil
+		}
+		if err := config.EnsureDirs(); err != nil {
+			return err
+		}
+	}
+
+	// Fallback: spawn detached daemon process directly (works cleanly in tests, sandboxes & non-launchd sessions).
+	return startDetachedDaemon(cfg, binPath)
+}
+
 func StopService(cfg *config.Config) error {
-	uid := strconv.Itoa(os.Getuid())
-	plist := LaunchAgentPath()
-	if _, err := os.Stat(plist); err == nil {
-		_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
+	if canManageHostLaunchAgent() {
+		uid := strconv.Itoa(os.Getuid())
+		plist := LaunchAgentPath()
+		if _, err := os.Stat(plist); err == nil {
+			_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
+		}
 	}
 
 	// Ask daemon to shutdown gracefully if reachable.
@@ -199,6 +567,9 @@ func StopService(cfg *config.Config) error {
 
 func UninstallLaunchAgent(cfg *config.Config) error {
 	_ = StopService(cfg)
+	if !canManageHostLaunchAgent() {
+		return nil
+	}
 	plist := LaunchAgentPath()
 	if err := os.Remove(plist); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -258,9 +629,11 @@ func FetchGateSnapshot(ctx context.Context, cfg *config.Config, forceCheck bool)
 }
 
 // Preflight ensures the daemon is running and the Fail-Closed Egress Gate is OPEN before launching any Claude client.
+// When auto_start_launch_agent is enabled on the host, it also idempotently registers/reuses the macOS LaunchAgent.
 func Preflight(ctx context.Context, cfg *config.Config, selfBin string, skipGate bool) (egress.GateSnapshot, error) {
-	if ok, _ := DaemonHealth(cfg); !ok {
-		if err := StartService(cfg, selfBin, false); err != nil {
+	useLaunchd := cfg != nil && cfg.ShouldAutoStartLaunchAgent() && canManageHostLaunchAgent()
+	if ok, _ := DaemonHealth(cfg); !ok || useLaunchd {
+		if err := StartService(cfg, selfBin, useLaunchd); err != nil {
 			return egress.GateSnapshot{}, fmt.Errorf("无法启动 PeaceClaude 本地安全网关: %w", err)
 		}
 	}

@@ -26,6 +26,7 @@ func (s *Server) controlHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/service/autostart", s.withCSRF(s.handleServiceAutostart))
 	mux.HandleFunc("/api/check", s.withCSRF(s.handleCheck))
 	mux.HandleFunc("/api/lock", s.withCSRF(s.handleLock))
 	mux.HandleFunc("/api/leaks", s.handleLeaks)
@@ -178,6 +179,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"rules":               profile.GetRulesStatus(&cfg),
 		"direct_leaks_count":  len(directHits),
 		"browser_pac":         host.InspectBrowserPAC(&cfg),
+		"service":             launcher.InspectLaunchAgentStatus(&cfg, true, os.Getpid()),
 		"storage":             collectStorageSummary(),
 		"remote":              remoteSt,
 	})
@@ -1319,6 +1321,74 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		"config": next.Redacted(),
 		"probe":  res,
 		"gate":   s.gate.Snapshot(),
+	})
+}
+
+func (s *Server) handleServiceAutostart(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if body.Enabled == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing enabled boolean"})
+		return
+	}
+	enabled := *body.Enabled
+
+	s.mu.Lock()
+	next := *s.cfg
+	next.Listen.AutoStartLaunchAgent = &enabled
+	if err := config.Save(&next); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	s.swapConfigLocked(next)
+	selfBin := s.selfBin
+	s.mu.Unlock()
+
+	action := "updated"
+	msg := ""
+	if !launcher.CanManageHostLaunchAgent() {
+		action = "saved_in_sandbox"
+		if enabled {
+			msg = "已开启开机自启策略（沙盒环境下跳过写入宿主机 LaunchAgent）"
+		} else {
+			msg = "已关闭开机自启策略（沙盒环境下跳过清理宿主机 LaunchAgent）"
+		}
+	} else if enabled {
+		stBefore := launcher.InspectLaunchAgentStatus(&next, true, os.Getpid())
+		if !stBefore.LaunchAgentSet || !stBefore.LaunchAgentValid {
+			if _, err := launcher.InstallLaunchAgentPlistOnly(selfBin); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			action = "installed_plist"
+		} else {
+			action = "already_installed"
+		}
+		if stBefore.LaunchAgentLoaded {
+			msg = "已开启开机自启守护（LaunchAgent 已注册并托管当前服务）"
+		} else {
+			msg = "已写入 LaunchAgent 开机自启配置；下次启动 PeaceClaude.app 或运行 `peaceclaude service ensure-autostart` 时将自动接入 launchd 托管"
+		}
+	} else {
+		if err := launcher.DisableLaunchAgentAutostart(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		action = "disabled"
+		msg = "已移除 LaunchAgent 开机自启项（当前运行中的安全网关保持在线不中断）"
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"action":  action,
+		"message": msg,
+		"service": launcher.InspectLaunchAgentStatus(&next, true, os.Getpid()),
 	})
 }
 

@@ -131,7 +131,7 @@ func TestBuildDesktopSpecNeverUsesForbiddenClaudeSwitches(t *testing.T) {
 }
 
 func TestEmbeddedMacOSSwiftSourceValid(t *testing.T) {
-	for _, sym := range []string{"WKWebView", "NSApplicationDelegate", "runJavaScriptConfirmPanelWithMessage", "#accounts"} {
+	for _, sym := range []string{"WKWebView", "NSApplicationDelegate", "runJavaScriptConfirmPanelWithMessage", "#accounts", "ensure-autostart"} {
 		if !strings.Contains(macOSAppSwiftSrc, sym) {
 			t.Fatalf("embedded app_macos.swift missing %q", sym)
 		}
@@ -309,5 +309,183 @@ func TestCFBundleBuildVersionAndSelfContainedAppBundle(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(appDir, "Contents", "Resources", "AppIcon.icns")); err != nil {
 			t.Fatalf("expected AppIcon.icns on macOS: %v", err)
 		}
+	}
+}
+
+func TestParseLaunchAgentProgramAndValidity(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	binPath := "/Users/demo/.local/bin/peaceclaude"
+	plist := RenderLaunchAgentPlist(binPath)
+	if !strings.Contains(plist, "<key>HOME</key>") {
+		t.Fatalf("expected RenderLaunchAgentPlist to include HOME env var")
+	}
+	if got := ParseLaunchAgentProgram(plist); got != binPath {
+		t.Fatalf("ParseLaunchAgentProgram = %q, want %q", got, binPath)
+	}
+	if gotBin, ok := ValidateLaunchAgentPlist(plist, func(p string) bool { return p == binPath }); !ok || gotBin != binPath {
+		t.Fatalf("ValidateLaunchAgentPlist valid case failed: bin=%q ok=%t", gotBin, ok)
+	}
+	if _, ok := ValidateLaunchAgentPlist(plist, func(string) bool { return false }); ok {
+		t.Fatalf("ValidateLaunchAgentPlist MUST fail when binary is not executable/present")
+	}
+	missingRun := strings.ReplaceAll(plist, "<string>run</string>", "<string>status</string>")
+	if _, ok := ValidateLaunchAgentPlist(missingRun, func(string) bool { return true }); ok {
+		t.Fatalf("ValidateLaunchAgentPlist MUST fail when <string>run</string> is missing")
+	}
+	if got := ParseLaunchAgentProgram("<plist></plist>"); got != "" {
+		t.Fatalf("expected empty program on malformed plist, got %q", got)
+	}
+}
+
+func TestEnsureLaunchAgentIdempotentSkipAndRepair(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	cfg := config.Default()
+	validBin := "/Users/demo/.local/bin/peaceclaude"
+	validPlist := RenderLaunchAgentPlist(validBin)
+
+	// 1. Healthy & loaded & running -> skipped without touching files or launchd.
+	installCalled := false
+	startCalled := false
+	res, err := ensureLaunchAgentWithOps(cfg, validBin, true, launchAgentOps{
+		canManage:  true,
+		plistPath:  "/tmp/test-agent.plist",
+		readFile:   func(string) ([]byte, error) { return []byte(validPlist), nil },
+		isExec:     func(p string) bool { return p == validBin },
+		isLoaded:   func() bool { return true },
+		isHealthy:  func() (bool, int) { return true, 4321 },
+		resolveBin: func(p string) (string, bool) { return p, false },
+		installFile: func(string) (string, error) {
+			installCalled = true
+			return "/tmp/test-agent.plist", nil
+		},
+		startLaunch: func(string) error {
+			startCalled = true
+			return nil
+		},
+		waitHealthy: func() (bool, int) { return true, 4321 },
+	})
+	if err != nil {
+		t.Fatalf("unexpected error on skip case: %v", err)
+	}
+	if res.Action != "skipped" || !res.Installed || !res.Loaded || !res.Running || res.PID != 4321 {
+		t.Fatalf("unexpected skip result: %+v", res)
+	}
+	if installCalled || startCalled {
+		t.Fatalf("skip path MUST NOT rewrite plist (%t) or kickstart launchd (%t)", installCalled, startCalled)
+	}
+
+	// 2. Missing plist -> installed and loaded.
+	installCalled = false
+	startCalled = false
+	res, err = ensureLaunchAgentWithOps(cfg, validBin, true, launchAgentOps{
+		canManage:  true,
+		plistPath:  "/tmp/missing.plist",
+		readFile:   func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		isExec:     func(p string) bool { return p == validBin },
+		isLoaded:   func() bool { return false },
+		isHealthy:  func() (bool, int) { return false, 0 },
+		resolveBin: func(p string) (string, bool) { return p, false },
+		installFile: func(bin string) (string, error) {
+			installCalled = true
+			if bin != validBin {
+				t.Fatalf("installFile got unexpected bin %q", bin)
+			}
+			return "/tmp/missing.plist", nil
+		},
+		startLaunch: func(string) error {
+			startCalled = true
+			return nil
+		},
+		waitHealthy: func() (bool, int) { return true, 9001 },
+	})
+	if err != nil || res.Action != "installed" || !installCalled || !startCalled || res.PID != 9001 {
+		t.Fatalf("installed path mismatch: res=%+v err=%v", res, err)
+	}
+
+	// 3. Invalid binary in plist + bare daemon running without launchd -> repaired + stopBare handoff.
+	stopBareCalled := false
+	res, err = ensureLaunchAgentWithOps(cfg, validBin, true, launchAgentOps{
+		canManage:  true,
+		plistPath:  "/tmp/broken.plist",
+		readFile:   func(string) ([]byte, error) { return []byte(RenderLaunchAgentPlist("/nonexistent/old/peaceclaude")), nil },
+		isExec:     func(p string) bool { return p == validBin },
+		isLoaded:   func() bool { return false },
+		isHealthy:  func() (bool, int) { return true, 555 },
+		resolveBin: func(p string) (string, bool) { return p, false },
+		installFile: func(string) (string, error) {
+			return "/tmp/broken.plist", nil
+		},
+		stopBare: func() { stopBareCalled = true },
+		startLaunch: func(string) error {
+			if !stopBareCalled {
+				t.Fatalf("expected bare daemon handoff before launchd start")
+			}
+			return nil
+		},
+		waitHealthy: func() (bool, int) { return true, 556 },
+	})
+	if err != nil || res.Action != "repaired" || !stopBareCalled || res.PID != 556 {
+		t.Fatalf("repaired path mismatch: res=%+v err=%v stopBare=%t", res, err, stopBareCalled)
+	}
+
+	// 4. Valid plist installed, not loaded -> restarted without rewriting plist.
+	installCalled = false
+	res, err = ensureLaunchAgentWithOps(cfg, validBin, true, launchAgentOps{
+		canManage:  true,
+		plistPath:  "/tmp/unloaded.plist",
+		readFile:   func(string) ([]byte, error) { return []byte(validPlist), nil },
+		isExec:     func(p string) bool { return p == validBin },
+		isLoaded:   func() bool { return false },
+		isHealthy:  func() (bool, int) { return false, 0 },
+		resolveBin: func(p string) (string, bool) { return p, false },
+		installFile: func(string) (string, error) {
+			installCalled = true
+			return "/tmp/unloaded.plist", nil
+		},
+		startLaunch: func(string) error { return nil },
+		waitHealthy: func() (bool, int) { return true, 666 },
+	})
+	if err != nil || res.Action != "restarted" || installCalled || res.PID != 666 {
+		t.Fatalf("restarted path mismatch: res=%+v err=%v installCalled=%t", res, err, installCalled)
+	}
+
+	// 5. Ephemeral DMG binary without stable installation -> skipped_ephemeral_binary.
+	res, err = ensureLaunchAgentWithOps(cfg, "/Volumes/PeaceClaude/PeaceClaude.app/Contents/Resources/bin/peaceclaude", true, launchAgentOps{
+		canManage:   true,
+		plistPath:   "/tmp/dmg.plist",
+		readFile:    func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		isExec:      func(string) bool { return false },
+		isLoaded:    func() bool { return false },
+		isHealthy:   func() (bool, int) { return false, 0 },
+		resolveBin:  func(string) (string, bool) { return "", true },
+		installFile: func(string) (string, error) { t.Fatal("must not write ephemeral plist"); return "", nil },
+		startLaunch: func(string) error { t.Fatal("must not start ephemeral launchd"); return nil },
+	})
+	if err != nil || res.Action != "skipped_ephemeral_binary" {
+		t.Fatalf("ephemeral path mismatch: res=%+v err=%v", res, err)
+	}
+
+	// 6. AutoStart disabled -> disabled (when respectConfig=true).
+	disabledCfg := config.Default()
+	f := false
+	disabledCfg.Listen.AutoStartLaunchAgent = &f
+	res, err = ensureLaunchAgentWithOps(disabledCfg, validBin, true, launchAgentOps{
+		canManage:   true,
+		plistPath:   "/tmp/disabled.plist",
+		isHealthy:   func() (bool, int) { return true, 777 },
+		installFile: func(string) (string, error) { t.Fatal("must not install when disabled"); return "", nil },
+	})
+	if err != nil || res.Action != "disabled" || !res.Running || res.PID != 777 {
+		t.Fatalf("disabled path mismatch: res=%+v err=%v", res, err)
+	}
+
+	// 7. Sandbox guard -> disabled_in_sandbox.
+	res, err = ensureLaunchAgentWithOps(cfg, validBin, true, launchAgentOps{
+		canManage: false,
+		plistPath: "/tmp/sandbox.plist",
+		isHealthy: func() (bool, int) { return false, 0 },
+	})
+	if err != nil || res.Action != "disabled_in_sandbox" {
+		t.Fatalf("sandbox guard mismatch: res=%+v err=%v", res, err)
 	}
 }

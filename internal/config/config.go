@@ -18,11 +18,19 @@ type ListenConfig struct {
 	HTTPPort             int      `json:"http_port"`
 	SOCKS5Port           int      `json:"socks5_port"`
 	ControlPort          int      `json:"control_port"`
+	AutoStartLaunchAgent *bool    `json:"auto_start_launch_agent,omitempty"`
 	AutoEnableBrowserPAC *bool    `json:"auto_enable_browser_pac,omitempty"`
 	BrowserPACPaused     bool     `json:"browser_pac_paused,omitempty"`
 	VMProxyEnabled       bool     `json:"vm_proxy_enabled"`
 	VMProxyBind          string   `json:"vm_proxy_bind,omitempty"`
 	VMProxySubnets       []string `json:"vm_proxy_subnets,omitempty"`
+}
+
+func (c *Config) ShouldAutoStartLaunchAgent() bool {
+	if c != nil && c.Listen.AutoStartLaunchAgent != nil {
+		return *c.Listen.AutoStartLaunchAgent
+	}
+	return true
 }
 
 func (c *Config) ShouldAutoEnableBrowserPAC() bool {

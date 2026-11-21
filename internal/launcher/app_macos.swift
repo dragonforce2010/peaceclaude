@@ -147,8 +147,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
     private func ensureDaemonAndLoad() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
+            self.ensureDaemonAutostartViaCLI()
             if !self.isDaemonHealthy() {
-                self.startDaemonCLI()
                 for _ in 0..<25 {
                     if self.isDaemonHealthy() { break }
                     Thread.sleep(forTimeInterval: 0.25)
@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         return baseDir + "/config.json"
     }
 
-    private func startDaemonCLI() {
+    private func ensureDaemonAutostartViaCLI() {
         let candidates = [
             NSHomeDirectory() + "/.local/bin/peaceclaude",
             "/opt/homebrew/bin/peaceclaude",
@@ -204,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: bin)
         if FileManager.default.fileExists(atPath: configPath()) {
-            proc.arguments = ["service", "start"]
+            proc.arguments = ["service", "ensure-autostart", "--if-enabled"]
         } else {
             proc.arguments = ["setup", "--no-app"]
         }

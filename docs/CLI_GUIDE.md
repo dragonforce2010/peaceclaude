@@ -80,12 +80,12 @@ peaceclaude ui
 
 | 命令 | 别名 | 参数说明 | 作用与行为 |
 |---|---|---|---|
-| `peaceclaude service` | — | `start \| stop \| restart \| status \| run` | 管理 LaunchAgent 后台守护进程与本地 HTTP (`:18897`) / SOCKS5 (`:18898`) / 控制面 (`:18899`) |
+| `peaceclaude service` | — | `start \| stop \| restart \| status \| ensure-autostart [--if-enabled] \| run` | 管理 LaunchAgent 开机自启（幂等自检注册/修复，已注册则跳过）与本地 HTTP (`:18897`) / SOCKS5 (`:18898`) / 控制面 (`:18899`) |
 | `peaceclaude config show` | — | 无 | 输出已自动脱敏的 `~/.peaceclaude/config.json` 当前配置 |
 | `peaceclaude config set-upstream` | — | `--mode <local-proxy\|direct-socks5\|direct-http>`、`--addr HOST:PORT`、`--user`、`--pass`、`--expected-ip` | 切换直连 Webshare SOCKS5/HTTP（零 Split-IP）或接管本地 Clash |
 | `peaceclaude config import-clash` | — | `--file PATH`、`--node NAME`、`--apply` | 安全预览 Clash 节点摘要并支持 `--apply` 一键导入为独立上游（绝不回显密码） |
 | `peaceclaude config gateway` | — | 无 | 实时验证静态出口 IP、Split-IP 一致性与 `platform.claude.com` OAuth TLS 连通性 |
-| `peaceclaude config set` | — | `<key> <value>` | 支持修改 `expected_ip`、`strict_split`、`telemetry_shield`、`auto_peace_desktop`、`cli_path`、`timezone`、`language` |
+| `peaceclaude config set` | — | `<key> <value>` | 支持修改 `expected_ip`、`strict_split`、`telemetry_shield`、`auto_peace_desktop`、`auto_start_launch_agent`、`cli_path`、`timezone`、`language` |
 | `peaceclaude lock` / `unlock` | — | `[reason]` | 手动触发 Fail-Closed 紧急熔断（秒断全部 Anthropic 连接）/ 解锁并触发重检 |
 | `peaceclaude vm-proxy` | `pf` | `status \| render \| on \| off \| install \| uninstall`、`--json` | 生成 `pfctl -n` 校验通过的 macOS `pf` 防直连 & IPv6 阻断规则与 Cowork VM 代理配置 |
 

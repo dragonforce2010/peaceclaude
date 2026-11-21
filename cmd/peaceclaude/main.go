@@ -130,7 +130,7 @@ func printUsage() {
   clean [--profile P] [--dry-run] [--yes]        可恢复指纹清理（自动备份，保留配置与 skills）
 
 守护服务与安全门禁:
-  service [start|stop|restart|status|run]        管理后台 Fail-Closed 本地安全网关 (HTTP/SOCKS5/PAC)
+  service [start|stop|restart|status|ensure-autostart|run]  管理后台 Fail-Closed 本地安全网关 (HTTP/SOCKS5/PAC/LaunchAgent)
   lock [reason]                                  立即紧急熔断（阻断一切出站并切断活跃连接）
   unlock                                         解除手动熔断并立即重检静态 IP 出口
   config [show|set-upstream|import-clash|gateway|set]  管理 Webshare / Clash 静态 IP 上游与测速
@@ -486,6 +486,7 @@ func cmdService(args []string) error {
 	}
 	fs := flag.NewFlagSet("service", flag.ContinueOnError)
 	noLaunchd := fs.Bool("no-launchd", false, "直接后台启动进程而不注册 LaunchAgent")
+	ifEnabled := fs.Bool("if-enabled", false, "仅在 auto_start_launch_agent 开启时注册/同步 LaunchAgent")
 	asJSON := fs.Bool("json", false, "输出 JSON")
 	if err := fs.Parse(rest); err != nil {
 		return err
@@ -520,6 +521,39 @@ func cmdService(args []string) error {
 		fmt.Printf("✔ PeaceClaude 安全网关已运行 (PID=%d)\n  HTTP 代理:   %s\n  SOCKS5 代理: %s\n  Web 控制台:  %s\n",
 			st.PID, st.HTTPProxyURL, st.SOCKS5ProxyURL, st.ControlURL)
 		return nil
+	case "ensure-autostart":
+		self := selfBinary()
+		res, err := launcher.EnsureLaunchAgent(cfg, self, *ifEnabled)
+		if err != nil {
+			return err
+		}
+		if (res.Action == "disabled" || res.Action == "disabled_in_sandbox" || res.Action == "skipped_ephemeral_binary") && !res.Running {
+			if err := launcher.StartService(cfg, self, false); err != nil {
+				return err
+			}
+			running, pid := launcher.DaemonHealth(cfg)
+			res.Running = running
+			res.PID = pid
+		}
+		if *asJSON {
+			printJSON(res)
+			return nil
+		}
+		switch res.Action {
+		case "skipped":
+			fmt.Printf("✔ LaunchAgent 开机项与守护进程均已就绪 (PID=%d, action=skipped)\n", res.PID)
+		case "installed":
+			fmt.Printf("✔ 已自动注册 LaunchAgent 开机项并启动守护进程 (PID=%d, plist=%s)\n", res.PID, res.LaunchAgentPath)
+		case "repaired":
+			fmt.Printf("✔ 已修复失效的 LaunchAgent 开机项并重启守护进程 (PID=%d, plist=%s)\n", res.PID, res.LaunchAgentPath)
+		case "restarted":
+			fmt.Printf("✔ 已重新加载 LaunchAgent 开机项并启动守护进程 (PID=%d)\n", res.PID)
+		case "disabled":
+			fmt.Printf("ℹ 已根据配置保持 LaunchAgent 开机自启关闭 (守护进程运行=%t, PID=%d)\n", res.Running, res.PID)
+		default:
+			fmt.Printf("ℹ ensure-autostart: action=%s running=%t pid=%d (%s)\n", res.Action, res.Running, res.PID, res.Reason)
+		}
+		return nil
 	case "stop":
 		if err := launcher.StopService(cfg); err != nil {
 			return err
@@ -545,11 +579,11 @@ func cmdService(args []string) error {
 		if st.Running {
 			state = fmt.Sprintf("运行中 (PID %d)", st.PID)
 		}
-		fmt.Printf("后台服务: %s\nLaunchAgent: %t (%s)\nHTTP 代理: %s\nSOCKS5 代理: %s\nWeb 控制台: %s\n",
-			state, st.LaunchAgentSet, st.LaunchAgentPath, st.HTTPProxyURL, st.SOCKS5ProxyURL, st.ControlURL)
+		fmt.Printf("后台服务: %s\nLaunchAgent: 已安装=%t 已加载=%t 有效=%t (开机自启策略=%t, 路径=%s)\nHTTP 代理: %s\nSOCKS5 代理: %s\nWeb 控制台: %s\n",
+			state, st.LaunchAgentSet, st.LaunchAgentLoaded, st.LaunchAgentValid, st.AutoStartEnabled, st.LaunchAgentPath, st.HTTPProxyURL, st.SOCKS5ProxyURL, st.ControlURL)
 		return nil
 	default:
-		return fmt.Errorf("未知 service 子命令 %q (可用: start|stop|restart|status|run)", sub)
+		return fmt.Errorf("未知 service 子命令 %q (可用: start|stop|restart|status|ensure-autostart|run)", sub)
 	}
 }
 
@@ -1319,7 +1353,7 @@ func cmdConfig(args []string) error {
 		return nil
 	case "set":
 		if len(rest) < 2 {
-			return errors.New("用法: peaceclaude config set <expected_ip|strict_split|telemetry_shield|auto_peace_desktop|cli_path|timezone|language> <value>")
+			return errors.New("用法: peaceclaude config set <expected_ip|strict_split|telemetry_shield|auto_peace_desktop|auto_start_launch_agent|cli_path|timezone|language> <value>")
 		}
 		k, v := rest[0], rest[1]
 		switch k {
@@ -1331,6 +1365,9 @@ func cmdConfig(args []string) error {
 			cfg.Shield.TelemetryShield = (v == "true" || v == "1" || v == "on")
 		case "auto_peace_desktop":
 			cfg.Identity.AutoPeaceDesktop = (v == "true" || v == "1" || v == "on")
+		case "auto_start_launch_agent":
+			b := (v == "true" || v == "1" || v == "on")
+			cfg.Listen.AutoStartLaunchAgent = &b
 		case "cli_path":
 			cfg.Binaries.ClaudeCLIPath = v
 		case "timezone":

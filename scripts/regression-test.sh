@@ -526,6 +526,42 @@ else
   fail "native_browser_shield_api" "native browser shield check failed"
 fi
 
+# 16f. Verify service status JSON fields & sandbox-safe ensure-autostart & /api/service/autostart contract
+SVC_STATUS_JSON="$(PEACECLAUDE_HOME="$TMP_HOME" PEACECLAUDE_NO_LAUNCHD=1 "$BIN" service status --json)"
+ENSURE_JSON="$(PEACECLAUDE_HOME="$TMP_HOME" PEACECLAUDE_NO_LAUNCHD=1 "$BIN" service ensure-autostart --if-enabled --json)"
+if python3 - "$SVC_STATUS_JSON" "$ENSURE_JSON" <<'PY'
+import json, sys
+st = json.loads(sys.argv[1])
+en = json.loads(sys.argv[2])
+for key in ("running", "launch_agent_installed", "launch_agent_loaded", "launch_agent_valid", "auto_start_enabled"):
+    assert key in st, f"service status missing {key}: {st}"
+assert st["running"] is True and st["auto_start_enabled"] is True, st
+assert en.get("action") == "disabled_in_sandbox", f"unexpected sandbox ensure-autostart: {en}"
+PY
+then
+  ok "service_status_and_ensure_autostart_sandbox" "service status JSON exposes launchd validity and ensure-autostart is sandbox-safe"
+else
+  fail "service_status_and_ensure_autostart_sandbox" "service status or ensure-autostart JSON check failed"
+fi
+
+STATUS_API_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/status")"
+AUTO_OFF_JSON="$(curl -fsS -X POST "http://127.0.0.1:${CTRL_PORT}/api/service/autostart" -H 'Content-Type: application/json' -d '{"enabled":false}')"
+AUTO_ON_JSON="$(curl -fsS -X POST "http://127.0.0.1:${CTRL_PORT}/api/service/autostart" -H 'Content-Type: application/json' -d '{"enabled":true}')"
+if python3 - "$STATUS_API_JSON" "$AUTO_OFF_JSON" "$AUTO_ON_JSON" <<'PY'
+import json, sys
+st = json.loads(sys.argv[1])
+off = json.loads(sys.argv[2])
+on = json.loads(sys.argv[3])
+assert st.get("service", {}).get("running") is True, st
+assert off.get("ok") is True and off.get("service", {}).get("auto_start_enabled") is False, off
+assert on.get("ok") is True and on.get("service", {}).get("auto_start_enabled") is True, on
+PY
+then
+  ok "api_service_autostart_contract" "/api/status.service and /api/service/autostart contract passed without breaking daemon"
+else
+  fail "api_service_autostart_contract" "/api/service/autostart contract check failed"
+fi
+
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes
 if ps -axo command= | grep -F "$TMP_HOME" | grep -qv grep; then
   fail "sandbox_zero_desktop_interference" "sandbox regression spawned unexpected process referencing $TMP_HOME"
