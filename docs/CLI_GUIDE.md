@@ -44,6 +44,12 @@ peaceclaude ui
 - Anthropic 的 `Location metadata`（结合服务侧风控判定）主要依据**出站请求的出口 IP 进行粗粒度城市/区域定位**，在静态代理出口下反映的是静态节点所在地信息，而不是本地城市。
 - 为进一步杜绝网页端通过 HTML5 Geolocation API 探测宿主机 macOS CoreLocation，`peaceclaude login-browser` 在每次启动隔离 Chromium 前，都会在档案 `Default/Preferences` 中预写 `profile.default_content_setting_values.geolocation = 2`（全局禁止获取地理位置权限），同时禁用本地 `dns_prefetching`、`async_dns` 与 QUIC/UDP 直出。
 
+### 3. 隔离浏览器的全维度反中国环境指纹加固（`https://fuck-claude.app/` 实测低风险）
+为避免浏览器侧暴露中文语言偏好、`Intl.DateTimeFormat().resolvedOptions().locale`（受 macOS 系统 `AppleLanguages` 影响）或 Canvas 中文字体列表：
+- **启动首选项强覆盖**：`ensureBrowserPrivacyPrefs` 在每次启动前覆盖写入 `Default/Preferences`（`intl.accept_languages`/`selected_languages = en-US,en`、`enable_do_not_track = true`、`geolocation = 2`、`dns_prefetching = false`、`async_dns = false`）与 `Local State`（`intl.app_locale = en-US`），配合 `--accept-lang=en-US,en` 消除 `zh-CN` 残留；
+- **Identity Shield MV3 扩展注入**：对 Chrome/Chromium/Brave/Edge，启动时通过仅绑定 `127.0.0.1` 的临时 CDP 端口执行 `Extensions.loadUnpacked` 加载本地 `peace-shield-ext`（随后立即 `Page.navigate` 并断开连接，绝不调用 `Runtime.enable`）：统一请求头 `Accept-Language`、`Sec-GPC: 1`、`DNT: 1`，补齐 `navigator.globalPrivacyControl = true`、`Intl` 默认区域为 `en-US`（`Intl.DateTimeFormat().resolvedOptions().locale`），并在 Canvas `2D` Context font setter 屏蔽常见简/繁中文字体枚举检测（不影响正常页面 DOM 文字渲染）；
+- 可在控制台「安全检测 → 浏览器环境信号自检」右上角点击 **「隔离浏览器实测」**，或终端执行 `peaceclaude login-browser https://fuck-claude.app/` 验证 **LOW RISK（低风险）** 得分。
+
 ---
 
 ## 三、全量 CLI 子命令速查

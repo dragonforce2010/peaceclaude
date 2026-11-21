@@ -35,6 +35,7 @@ func BuildIsolatedEnv(cfg *config.Config, prof *profile.Profile, gate egress.Gat
 		"SOCKS_PROXY": true, "socks_proxy": true,
 		"CLAUDE_CONFIG_DIR": true,
 		"TZ": true, "LANG": true, "LC_ALL": true, "LC_CTYPE": true,
+		"LANGUAGE": true, "LC_TIME": true, "LC_NUMERIC": true, "LC_MONETARY": true, "LC_MESSAGES": true,
 		"DISABLE_TELEMETRY": true, "DISABLE_ERROR_REPORTING": true,
 	}
 
@@ -80,6 +81,7 @@ func BuildIsolatedEnv(cfg *config.Config, prof *profile.Profile, gate egress.Gat
 		"LANG":                 locale,
 		"LC_ALL":               locale,
 		"LC_CTYPE":             locale,
+		"LANGUAGE":             "en_US:en",
 		"PEACECLAUDE_ACTIVE":    "1",
 		"PEACECLAUDE_PROFILE":   prof.Name,
 		"PEACECLAUDE_EGRESS_IP": gate.LastGood.EgressIP,

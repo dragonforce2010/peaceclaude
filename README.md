@@ -71,7 +71,7 @@ pclaude cli --continue
   # 或传入 CLI 打印出来的 OAuth URL：
   peaceclaude login-browser "https://platform.claude.com/oauth/authorize?..."
   ```
-  该浏览器使用独立的 `browser-profile`，强制走 `peaceclaude` 静态 IP 网关 + 同款美区时区与 `en-US` 语言，且禁用 QUIC 与 WebRTC 非代理 UDP。
+  该浏览器使用独立的 `browser-profile`，强制走 `peaceclaude` 静态 IP 网关与美区时区/语言；通过强写 `Preferences`/`Local State` 覆盖语言与 `DNT`/`Geolocation` 禁权，并在 Chromium 浏览器按需加载本地回环 `Identity Shield` MV3 扩展统一 `navigator.languages`、`Intl` 默认区域、GPC 与 Canvas 中文字体指纹枚举，且禁用 QUIC 与 WebRTC 非代理 UDP。
 - **普通浏览器（Chrome / Safari / Arc / Edge）网络层自动保护**：
   ```bash
   peaceclaude browser-pac on     # 开启系统 PAC（仅 Claude 域名走 PeaceClaude，不影响飞连与日常网页）

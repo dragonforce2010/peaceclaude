@@ -1190,17 +1190,26 @@
   }
 
   function checkBrowserFingerprint() {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '未知';
+    const opts = Intl.DateTimeFormat().resolvedOptions();
+    const tz = opts.timeZone || '未知';
+    const intlLocale = opts.locale || '未知';
     const lang = navigator.language || '未知';
-    const langs = (navigator.languages || []).join(', ') || lang;
-    const isUS = tz.startsWith('America/') && lang.toLowerCase().startsWith('en');
+    const langsList = navigator.languages || [];
+    const langs = langsList.join(', ') || lang;
+    const hasCNLang = langsList.some((x) => String(x).toLowerCase().startsWith('zh')) || String(lang).toLowerCase().startsWith('zh');
+    const isNonCNIntl = !String(intlLocale).toLowerCase().startsWith('zh');
+    const dnt = navigator.doNotTrack === '1' ? 'on' : 'off';
+    const gpc = navigator.globalPrivacyControl ? 'on' : 'off';
+    const isUS = tz.startsWith('America/') && lang.toLowerCase().startsWith('en') && !hasCNLang && isNonCNIntl;
     $('browser-fp-grid').innerHTML = [
-      ['浏览器时区', tz, isUS],
-      ['UTC 偏移 (分钟)', String(-new Date().getTimezoneOffset()), true],
+      ['浏览器时区', tz, tz.startsWith('America/')],
+      ['UTC 偏移 (分钟)', String(-new Date().getTimezoneOffset()), -new Date().getTimezoneOffset() !== 480],
       ['首选语言', lang, lang.toLowerCase().startsWith('en')],
-      ['Accept-Languages', langs, true],
+      ['Accept-Languages', langs, !hasCNLang],
+      ['Intl Locale', intlLocale, isNonCNIntl],
+      ['DNT / GPC 隐私信号', `DNT: ${dnt}, GPC: ${gpc}`, dnt === 'on' && gpc === 'on'],
       ['当前面板来源', location.origin, true],
-      ['隔离建议', isUS ? '已处于伪装环境' : '建议使用各账号「隔离浏览器登录」', isUS],
+      ['隔离建议', isUS ? '已处于隔离低风险环境' : '请点右上「隔离浏览器实测」开 fuck-claude.app 验证', isUS],
     ].map(([k, v, ok]) => `<div class="fp-item ${ok ? 'ok' : 'warn'}"><div class="fp-k">${esc(k)}</div><div class="fp-v">${esc(v)}</div></div>`).join('');
   }
 
@@ -1699,6 +1708,11 @@
     } catch (e) { toast(e.message, 'err'); }
   });
   $('btn-check-browser-fp').addEventListener('click', () => { checkBrowserFingerprint(); toast('浏览器指纹已刷新', 'ok'); });
+  $('btn-launch-browser-fc')?.addEventListener('click', () => withBtnBusy($('btn-launch-browser-fc'), '启动中…', async () => {
+    const r = await api('/api/launch/browser', { method: 'POST', body: JSON.stringify({ url: 'https://fuck-claude.app/' }) });
+    const bName = (r.browser || '').split('/').pop() || 'Browser';
+    toast(`已用 ${r.profile || 'default'} 隔离浏览器打开 fuck-claude.app（${bName}${r.pid ? ' · PID ' + r.pid : ''}），请点击 START SCAN 实测`, 'ok');
+  }));
   $('btn-run-diagnose').addEventListener('click', () => withBtnBusy($('btn-run-diagnose'), '探测中…', async () => {
     const el = $('diagnose-result');
     el.innerHTML = '<p class="muted">正在经静态 IP 探测上游端点…</p>';

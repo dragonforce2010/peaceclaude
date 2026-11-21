@@ -439,6 +439,39 @@ if [[ "$CAN_LIVE" == "1" ]]; then
   fi
 fi
 
+# 16b. Isolated login browser fingerprint hardening & Identity Shield artifacts regression check
+if [[ -d "/Applications/Google Chrome.app" || -d "/Applications/Chromium.app" || -d "/Applications/Brave Browser.app" || -d "/Applications/Microsoft Edge.app" ]]; then
+  BROWSER_DRY="$("$BIN" login-browser --dry-run https://fuck-claude.app/)"
+  BPROF_DIR="${TMP_HOME}/profiles/default/browser-profile"
+  if [[ "$BROWSER_DRY" == *"--accept-lang=en-US,en"* && "$BROWSER_DRY" == *"--enable-unsafe-extension-debugging"* ]] \
+    && python3 - "$BPROF_DIR" <<'PY'
+import json, os, sys
+bdir = sys.argv[1]
+prefs = json.load(open(os.path.join(bdir, "Default", "Preferences")))
+assert prefs["enable_do_not_track"] is True, prefs
+assert prefs["intl"]["accept_languages"] == "en-US,en", prefs["intl"]
+assert prefs["intl"]["selected_languages"] == "en-US,en", prefs["intl"]
+assert prefs["profile"]["default_content_setting_values"]["geolocation"] == 2, prefs["profile"]
+ls = json.load(open(os.path.join(bdir, "Local State")))
+assert ls["intl"]["app_locale"] == "en-US", ls
+ext_dir = os.path.join(bdir, "peace-shield-ext")
+manifest = json.load(open(os.path.join(ext_dir, "manifest.json")))
+rules = json.load(open(os.path.join(ext_dir, "rules.json")))
+shield = open(os.path.join(ext_dir, "shield.js")).read()
+assert manifest["manifest_version"] == 3 and "declarativeNetRequest" in manifest["permissions"]
+assert any(h.get("header") == "Sec-GPC" for h in rules[0]["action"]["requestHeaders"])
+assert "globalPrivacyControl" in shield and "CJK_FONT_RE" in shield and "Intl" in shield
+PY
+  then
+    if command -v node >/dev/null 2>&1; then
+      node --check "${BPROF_DIR}/peace-shield-ext/shield.js"
+    fi
+    ok "isolated_browser_shield_artifacts" "Chrome Preferences, Local State, and valid MV3 Identity Shield artifacts generated"
+  else
+    fail "isolated_browser_shield_artifacts" "missing hardened flags or extension artifacts in $BROWSER_DRY"
+  fi
+fi
+
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes
 if ps -axo command= | grep -F "$TMP_HOME" | grep -qv grep; then
   fail "sandbox_zero_desktop_interference" "sandbox regression spawned unexpected process referencing $TMP_HOME"

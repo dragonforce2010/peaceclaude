@@ -331,7 +331,7 @@ func RunDoctor(ctx context.Context, cfg *config.Config, daemonRunning bool, gate
 			"关闭原生 Claude.app 窗口，改用 `/Applications/PeaceClaude.app` 或 `peaceclaude app`", 8, true)
 	} else {
 		add("browser_desktop_tz_lang", "5. 浏览器与 Desktop 时区与语言", "pass",
-			fmt.Sprintf("Desktop & 登录浏览器均强制注入 --lang=%s · -AppleLanguages · TZ=%s（当前无暴露原生实例）",
+			fmt.Sprintf("Desktop & 隔离登录浏览器均强制注入 --lang=%s · --accept-lang · TZ=%s，且启用 Identity Shield（Intl/DNT/GPC/Geolocation 禁权与 Canvas 中文字体防护）",
 				cfg.Identity.Language, gateSnap.EffectiveTimezone),
 			"", 8, true)
 	}

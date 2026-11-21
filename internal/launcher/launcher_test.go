@@ -1,7 +1,10 @@
 package launcher
 
 import (
+	"encoding/json"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -34,6 +37,8 @@ func TestBuildIsolatedEnvStripsHostPollutionAndInjectsPeace(t *testing.T) {
 		"HTTP_PROXY=http://127.0.0.1:9999",
 		"TZ=Asia/Shanghai",
 		"LANG=zh_CN.UTF-8",
+		"LANGUAGE=zh_CN:zh",
+		"LC_TIME=zh_CN.UTF-8",
 	}
 	out := BuildIsolatedEnv(cfg, prof, gate, hostEnv)
 	envMap := map[string]string{}
@@ -42,10 +47,13 @@ func TestBuildIsolatedEnvStripsHostPollutionAndInjectsPeace(t *testing.T) {
 		envMap[k] = v
 	}
 
-	for _, stripped := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK"} {
+	for _, stripped := range []string{"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "LC_TIME"} {
 		if _, exists := envMap[stripped]; exists {
 			t.Fatalf("expected host env %s to be stripped", stripped)
 		}
+	}
+	if envMap["LANGUAGE"] != "en_US:en" {
+		t.Fatalf("expected LANGUAGE=en_US:en, got %q", envMap["LANGUAGE"])
 	}
 	if envMap["HTTP_PROXY"] != cfg.HTTPProxyURL() || envMap["ALL_PROXY"] != cfg.SOCKS5ProxyURL() {
 		t.Fatalf("unexpected proxy env: HTTP=%q ALL=%q", envMap["HTTP_PROXY"], envMap["ALL_PROXY"])
@@ -165,5 +173,85 @@ func TestLaunchLoginBrowserCleanFlagsWithoutUnsupportedBanner(t *testing.T) {
 	}
 	if !strings.Contains(string(rawPrefs), `"geolocation":2`) {
 		t.Fatalf("expected geolocation blocked in Preferences, got: %s", string(rawPrefs))
+	}
+}
+
+func TestBrowserPrivacyPrefsOverwritesChineseAndGeneratesValidShieldExtension(t *testing.T) {
+	tmp := t.TempDir()
+	browserDir := filepath.Join(tmp, "browser-profile")
+	defDir := filepath.Join(browserDir, "Default")
+	if err := os.MkdirAll(defDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Seed dirty Chrome preferences from a Chinese macOS host
+	dirtyPrefs := `{"intl":{"accept_languages":"zh-CN,zh","selected_languages":"zh-CN,zh"},"other":{"keep":true}}`
+	if err := os.WriteFile(filepath.Join(defDir, "Preferences"), []byte(dirtyPrefs), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureBrowserPrivacyPrefs(browserDir, "en-US"); err != nil {
+		t.Fatalf("ensureBrowserPrivacyPrefs: %v", err)
+	}
+	rawPrefs, err := os.ReadFile(filepath.Join(defDir, "Preferences"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prefs map[string]any
+	if err := json.Unmarshal(rawPrefs, &prefs); err != nil {
+		t.Fatal(err)
+	}
+	if dnt, _ := prefs["enable_do_not_track"].(bool); !dnt {
+		t.Fatalf("expected enable_do_not_track=true, got %v", prefs["enable_do_not_track"])
+	}
+	intl, _ := prefs["intl"].(map[string]any)
+	if intl["accept_languages"] != "en-US,en" || intl["selected_languages"] != "en-US,en" {
+		t.Fatalf("expected zh-CN overwritten with en-US,en, got %v", intl)
+	}
+	if other, _ := prefs["other"].(map[string]any); other["keep"] != true {
+		t.Fatalf("expected unrelated preferences preserved, got %v", prefs["other"])
+	}
+
+	rawLS, err := os.ReadFile(filepath.Join(browserDir, "Local State"))
+	if err != nil {
+		t.Fatalf("expected Local State: %v", err)
+	}
+	var ls map[string]any
+	if err := json.Unmarshal(rawLS, &ls); err != nil {
+		t.Fatal(err)
+	}
+	lsIntl, _ := ls["intl"].(map[string]any)
+	if lsIntl["app_locale"] != "en-US" {
+		t.Fatalf("expected Local State intl.app_locale=en-US, got %v", lsIntl)
+	}
+
+	extDir, err := ensureBrowserShieldExtension(browserDir, "en-US")
+	if err != nil {
+		t.Fatalf("ensureBrowserShieldExtension: %v", err)
+	}
+	for _, fn := range []string{"manifest.json", "rules.json", "shield.js"} {
+		if _, err := os.Stat(filepath.Join(extDir, fn)); err != nil {
+			t.Fatalf("missing generated extension artifact %s: %v", fn, err)
+		}
+	}
+	shieldBytes, err := os.ReadFile(filepath.Join(extDir, "shield.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shieldStr := string(shieldBytes)
+	for _, want := range []string{"globalPrivacyControl", "Intl", "CJK_FONT_RE", "PingFang", "Hiragino Sans GB", "Microsoft YaHei", "CanvasRenderingContext2D"} {
+		if !strings.Contains(shieldStr, want) {
+			t.Fatalf("shield.js missing %q", want)
+		}
+	}
+	if nodeBin, err := exec.LookPath("node"); err == nil {
+		if out, err := exec.Command(nodeBin, "--check", filepath.Join(extDir, "shield.js")).CombinedOutput(); err != nil {
+			t.Fatalf("shield.js syntax error: %v (%s)", err, string(out))
+		}
+	}
+	if !supportsCDPShieldBrowser("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome") {
+		t.Fatalf("expected Google Chrome to support CDP shield")
+	}
+	if supportsCDPShieldBrowser("/Applications/Arc.app/Contents/MacOS/Arc") {
+		t.Fatalf("expected Arc to skip CDP shield")
 	}
 }
