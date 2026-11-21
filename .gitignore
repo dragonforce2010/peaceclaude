@@ -1,0 +1,15 @@
+# Build outputs
+bin/
+*.exe
+*.test
+*.out
+coverage.out
+
+# Local state, logs, backups, OS junk
+.DS_Store
+*.log
+*.bak
+*.tmp
+.env
+.env.*
+config.local.json

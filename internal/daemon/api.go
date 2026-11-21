@@ -1,0 +1,565 @@
+package daemon
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"peaceclaude/internal/config"
+	"peaceclaude/internal/host"
+	"peaceclaude/internal/launcher"
+	"peaceclaude/internal/profile"
+	"peaceclaude/internal/proxy"
+	"peaceclaude/internal/ui"
+	"peaceclaude/internal/version"
+)
+
+func (s *Server) controlHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/health", s.handleHealth)
+	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/check", s.withCSRF(s.handleCheck))
+	mux.HandleFunc("/api/lock", s.withCSRF(s.handleLock))
+	mux.HandleFunc("/api/leaks", s.handleLeaks)
+	mux.HandleFunc("/api/leaks/clear", s.withCSRF(s.handleLeaksClear))
+	mux.HandleFunc("/api/capture", s.handleCapture)
+	mux.HandleFunc("/api/capture/toggle", s.withCSRF(s.handleCaptureToggle))
+	mux.HandleFunc("/api/capture/clear", s.withCSRF(s.handleCaptureClear))
+	mux.HandleFunc("/api/profiles", s.handleProfiles)
+	mux.HandleFunc("/api/profiles/create", s.withCSRF(s.handleProfileCreate))
+	mux.HandleFunc("/api/profiles/use", s.withCSRF(s.handleProfileUse))
+	mux.HandleFunc("/api/profiles/clean", s.withCSRF(s.handleProfileClean))
+	mux.HandleFunc("/api/rules/toggle", s.withCSRF(s.handleRulesToggle))
+	mux.HandleFunc("/api/doctor", s.handleDoctor)
+	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
+	mux.HandleFunc("/api/pause-and-recheck", s.withCSRF(s.handlePauseAndRecheck))
+	mux.HandleFunc("/api/inspect/desktop", s.handleInspectDesktop)
+	mux.HandleFunc("/api/desktop/takeover", s.withCSRF(s.handleDesktopTakeover))
+	mux.HandleFunc("/api/launch/desktop", s.withCSRF(s.handleLaunchDesktop))
+	mux.HandleFunc("/api/launch/browser", s.withCSRF(s.handleLaunchBrowser))
+	mux.HandleFunc("/api/config/update", s.withCSRF(s.handleConfigUpdate))
+	mux.HandleFunc("/api/shutdown", s.withCSRF(s.handleShutdown))
+	mux.HandleFunc("/peaceclaude.pac", s.handlePAC)
+	mux.Handle("/", ui.Handler())
+	return mux
+}
+
+func (s *Server) withCSRF(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+			return
+		}
+		// Ensure Host is loopback (prevents DNS rebinding attacks).
+		h := strings.ToLower(r.Host)
+		if !strings.HasPrefix(h, "127.0.0.1") && !strings.HasPrefix(h, "localhost") && !strings.HasPrefix(h, "[::1]") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "non-loopback Host rejected"})
+			return
+		}
+		// If browser sends Origin, it MUST match loopback origin.
+		if origin := strings.ToLower(strings.TrimSpace(r.Header.Get("Origin"))); origin != "" {
+			if !strings.HasPrefix(origin, "http://127.0.0.1") && !strings.HasPrefix(origin, "http://localhost") && !strings.HasPrefix(origin, "http://[::1]") {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin mutation rejected"})
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(payload)
+}
+
+func decodeJSON(r *http.Request, dst any) error {
+	defer r.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(r.Body, 256*1024))
+	if err != nil {
+		return err
+	}
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return nil
+	}
+	return json.Unmarshal(body, dst)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"pid":        os.Getpid(),
+		"version":    version.Version,
+		"started_at": s.startedAt,
+	})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+
+	profs, _ := profile.List(&cfg)
+	directHits := s.currentDirectHits()
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":            version.Version,
+		"pid":                os.Getpid(),
+		"uptime_sec":         int64(time.Since(s.startedAt).Seconds()),
+		"config":             cfg.Redacted(),
+		"gate":               s.gate.Snapshot(),
+		"stats":              s.audit.Stats(),
+		"clash":              host.InspectClash(cfg.Upstream.ClashSocket),
+		"vm_proxy":           host.InspectVMProxy(&cfg),
+		"active_profile":     cfg.ActiveProfile,
+		"profiles_count":     len(profs),
+		"rules":              profile.GetRulesStatus(&cfg),
+		"direct_leaks_count": len(directHits),
+		"browser_pac":        host.InspectBrowserPAC(&cfg),
+	})
+}
+
+func (s *Server) handleCheck(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	res := s.gate.Check(ctx, false)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"result": res,
+		"gate":   s.gate.Snapshot(),
+	})
+}
+
+func (s *Server) handleLock(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Locked bool   `json:"locked"`
+		Reason string `json:"reason"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.gate.SetManualLock(body.Locked, body.Reason)
+	closed := 0
+	if body.Locked {
+		closed = s.gateway.CloseProtectedConns()
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		s.gate.Check(ctx, false)
+		cancel()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"closed_conns": closed,
+		"gate":         s.gate.Snapshot(),
+	})
+}
+
+func (s *Server) handleLeaks(w http.ResponseWriter, r *http.Request) {
+	since := 24 * time.Hour
+	if sv := r.URL.Query().Get("since"); sv != "" {
+		if d, err := time.ParseDuration(sv); err == nil {
+			since = d
+		}
+	}
+	limit := 200
+	if lv := r.URL.Query().Get("limit"); lv != "" {
+		if n, err := strconv.Atoi(lv); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	s.scanDirectSockets()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"events":              s.audit.ListLeaks(since, limit),
+		"host_direct_sockets": s.currentDirectHits(),
+	})
+}
+
+func (s *Server) handleLeaksClear(w http.ResponseWriter, _ *http.Request) {
+	s.audit.ClearLeaks()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleCapture(w http.ResponseWriter, r *http.Request) {
+	limit := 200
+	if lv := r.URL.Query().Get("limit"); lv != "" {
+		if n, err := strconv.Atoi(lv); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if id := r.URL.Query().Get("id"); id != "" {
+		rec, ok := s.audit.GetCapture(id)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "capture record not found"})
+			return
+		}
+		writeJSON(w, http.StatusOK, rec)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled": s.audit.CaptureEnabled(),
+		"records": s.audit.ListCaptures(limit),
+	})
+}
+
+func (s *Server) handleCaptureToggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.audit.SetCaptureEnabled(body.Enabled)
+	s.mu.Lock()
+	s.cfg.Capture.Enabled = body.Enabled
+	_ = config.Save(s.cfg)
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]bool{"enabled": body.Enabled})
+}
+
+func (s *Server) handleCaptureClear(w http.ResponseWriter, _ *http.Request) {
+	s.audit.ClearCaptures()
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleProfiles(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	list, err := profile.List(&cfg)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"active":   cfg.ActiveProfile,
+		"profiles": list,
+	})
+}
+
+func (s *Server) handleProfileCreate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+		Note string `json:"note"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	p, err := profile.Ensure(&cfg, strings.TrimSpace(body.Name), strings.TrimSpace(body.Note))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+func (s *Server) handleProfileUse(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	s.mu.Lock()
+	if _, err := profile.Ensure(s.cfg, name, ""); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.cfg.ActiveProfile = name
+	err := config.Save(s.cfg)
+	s.mu.Unlock()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"active": name})
+}
+
+func (s *Server) handleProfileClean(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name   string `json:"name"`
+		DryRun bool   `json:"dry_run"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		name = cfg.ActiveProfile
+	}
+	rep, err := profile.CleanProfile(&cfg, name, body.DryRun)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
+func (s *Server) handleRulesToggle(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.mu.Lock()
+	st, err := profile.SyncAllRules(s.cfg, body.Enabled)
+	s.mu.Unlock()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	rep := host.RunDoctor(ctx, &cfg, true, s.gate.Snapshot())
+	writeJSON(w, http.StatusOK, rep)
+}
+
+func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	rep := host.Diagnose(ctx, &cfg, s.gate.Snapshot())
+	writeJSON(w, http.StatusOK, rep)
+}
+
+func (s *Server) handlePauseAndRecheck(w http.ResponseWriter, r *http.Request) {
+	// 1. Immediately pause outbound traffic & cut active protected connections.
+	s.gate.SetManualLock(true, "暂停外网执行全量 11 项安全重检")
+	closed := s.gateway.CloseProtectedConns()
+
+	// 2. Unlock manual pause and run fresh egress probe; gate stays locked if probe fails.
+	s.gate.SetManualLock(false, "")
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	probeRes := s.gate.Check(ctx, false)
+
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	doc := host.RunDoctor(ctx, &cfg, true, s.gate.Snapshot())
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"closed_conns": closed,
+		"probe":        probeRes,
+		"gate":         s.gate.Snapshot(),
+		"doctor":       doc,
+	})
+}
+
+func (s *Server) handleInspectDesktop(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	writeJSON(w, http.StatusOK, host.InspectRunningDesktop(&cfg))
+}
+
+func (s *Server) handleDesktopTakeover(w http.ResponseWriter, r *http.Request) {
+	term, pid, blocked, err := s.TakeoverAllExposed(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if blocked != "" {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]any{
+			"terminated": term,
+			"blocked":    true,
+			"error":      "已关闭未隔离原生 Claude.app，但当前出口门禁已锁定，暂未重开: " + blocked,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":             true,
+		"terminated":     term,
+		"relaunched_pid": pid,
+	})
+}
+
+func (s *Server) handleLaunchDesktop(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Profile string `json:"profile"`
+	}
+	_ = decodeJSON(r, &body)
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+
+	spec, pid, err := launcher.LaunchDesktop(r.Context(), &cfg, s.selfBin, body.Profile, nil, false)
+	if err != nil {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":       true,
+		"pid":      pid,
+		"profile":  spec.Profile,
+		"data_dir": spec.DataDir,
+	})
+}
+
+func (s *Server) handleLaunchBrowser(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Profile string `json:"profile"`
+		URL     string `json:"url"`
+	}
+	_ = decodeJSON(r, &body)
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+
+	browser, _, err := launcher.LaunchLoginBrowser(r.Context(), &cfg, s.selfBin, body.Profile, body.URL, false)
+	if err != nil {
+		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"browser": browser,
+	})
+}
+
+func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UpstreamMode          string   `json:"upstream_mode"`
+		UpstreamAddress       string   `json:"upstream_address"`
+		UpstreamUsername      string   `json:"upstream_username"`
+		UpstreamPassword      string   `json:"upstream_password"`
+		ExpectedIP            string   `json:"expected_ip"`
+		AllowedCountries      []string `json:"allowed_countries"`
+		Language              string   `json:"language"`
+		Timezone              string   `json:"timezone"`
+		FailClosed            *bool    `json:"fail_closed"`
+		SyncTimezone          *bool    `json:"sync_timezone"`
+		TelemetryShield       *bool    `json:"telemetry_shield"`
+		StrictDomainIsolation *bool    `json:"strict_domain_isolation"`
+		SkipProbeDuringSSE    *bool    `json:"skip_probe_during_sse"`
+		StripHostAnthropicEnv *bool    `json:"strip_host_anthropic_env"`
+		AllowCorporateDirect  *bool    `json:"allow_corporate_direct"`
+		VMProxyEnabled        *bool    `json:"vm_proxy_enabled"`
+		AutoPeaceDesktop       *bool    `json:"auto_peace_desktop"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
+	s.mu.Lock()
+	next := *s.cfg
+	if body.UpstreamMode != "" {
+		next.Upstream.Mode = body.UpstreamMode
+	}
+	if body.UpstreamAddress != "" {
+		next.Upstream.Address = body.UpstreamAddress
+	}
+	if body.UpstreamUsername != "" {
+		next.Upstream.Username = body.UpstreamUsername
+	}
+	if body.UpstreamPassword != "" {
+		next.Upstream.Password = body.UpstreamPassword
+	}
+	next.Egress.ExpectedIP = strings.TrimSpace(body.ExpectedIP)
+	if body.AllowedCountries != nil {
+		next.Egress.AllowedCountries = body.AllowedCountries
+	}
+	if body.Language != "" {
+		next.Identity.Language = body.Language
+	}
+	next.Identity.Timezone = strings.TrimSpace(body.Timezone)
+	if body.FailClosed != nil {
+		next.Egress.FailClosed = *body.FailClosed
+	}
+	if body.SyncTimezone != nil {
+		next.Identity.SyncTimezone = *body.SyncTimezone
+	}
+	if body.TelemetryShield != nil {
+		next.Shield.TelemetryShield = *body.TelemetryShield
+	}
+	if body.StrictDomainIsolation != nil {
+		next.Egress.StrictDomainIsolation = *body.StrictDomainIsolation
+	}
+	if body.SkipProbeDuringSSE != nil {
+		next.Egress.SkipProbeDuringSSE = *body.SkipProbeDuringSSE
+	}
+	if body.StripHostAnthropicEnv != nil {
+		next.Identity.StripHostAnthropicEnv = *body.StripHostAnthropicEnv
+	}
+	if body.AllowCorporateDirect != nil {
+		next.Shield.AllowCorporateDirect = *body.AllowCorporateDirect
+	}
+	if body.VMProxyEnabled != nil {
+		next.Listen.VMProxyEnabled = *body.VMProxyEnabled
+	}
+	if body.AutoPeaceDesktop != nil {
+		next.Identity.AutoPeaceDesktop = *body.AutoPeaceDesktop
+	}
+
+	if err := config.Save(&next); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	*s.cfg = next
+	s.gateway.UpdateConfig(s.cfg)
+	s.gate.UpdateConfig(s.cfg)
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	res := s.gate.Check(ctx, false)
+	cancel()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"config": next.Redacted(),
+		"probe":  res,
+		"gate":   s.gate.Snapshot(),
+	})
+}
+
+func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"shutting_down": true})
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		s.Shutdown(ctx)
+	}()
+}
+
+func (s *Server) handlePAC(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	mode := r.URL.Query().Get("mode")
+	pac := proxy.RenderPAC(&cfg, mode)
+	w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, pac)
+}

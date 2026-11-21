@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeaceClaude — 省心、放心的 Claude 静态 IP 安心工作台</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="28" height="28" fill="none">
+            <rect x="2" y="2" width="28" height="28" rx="8" fill="#182026" stroke="#E07A55" stroke-width="1.8"/>
+            <path d="M16 7L23 9.8V15.5C23 20 19.9 23.7 16 25C12.1 23.7 9 20 9 15.5V9.8L16 7Z" stroke="#E07A55" stroke-width="2" fill="rgba(224,122,85,0.12)"/>
+            <circle cx="16" cy="14.5" r="2.2" fill="#34D399"/>
+            <rect x="15.1" y="16" width="1.8" height="4.2" rx="0.9" fill="#34D399"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-name">PeaceClaude</div>
+          <div class="brand-sub" id="version-badge">v0.1.0 · Zero-VM</div>
+        </div>
+      </div>
+
+      <nav class="nav-list" role="tablist">
+        <button class="nav-item active" data-tab="overview">
+          <span class="nav-dot"></span>总览与安全体检
+        </button>
+        <button class="nav-item" data-tab="profiles">
+          <span class="nav-dot"></span>隔离档案与规则
+        </button>
+        <button class="nav-item" data-tab="leaks">
+          <span class="nav-dot"></span>泄漏审计 <span class="pill-count" id="nav-leak-count">0</span>
+        </button>
+        <button class="nav-item" data-tab="capture">
+          <span class="nav-dot"></span>脱敏抓包 <span class="pill-count" id="nav-cap-count">0</span>
+        </button>
+        <button class="nav-item" data-tab="diagnose">
+          <span class="nav-dot"></span>403 分诊与 pf 护盾
+        </button>
+        <button class="nav-item" data-tab="settings">
+          <span class="nav-dot"></span>上游与安全策略
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="mini-stat">
+          <span>HTTP 代理</span>
+          <code id="sb-http-addr">127.0.0.1:18897</code>
+        </div>
+        <div class="mini-stat">
+          <span>SOCKS5 代理</span>
+          <code id="sb-socks-addr">127.0.0.1:18898</code>
+        </div>
+        <div class="mini-stat">
+          <span>当前激活档案</span>
+          <code id="sb-active-profile">default</code>
+        </div>
+        <button class="btn btn-ghost btn-sm full-w" id="theme-toggle">切换浅色 / 深色主题</button>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <!-- Top Fail-Closed Gate Status Banner -->
+      <header class="gate-banner" id="gate-banner" data-state="loading">
+        <div class="gate-left">
+          <div class="gate-pill" id="gate-pill">
+            <span class="pulse-dot"></span>
+            <span id="gate-pill-text">正在检测出口门禁…</span>
+          </div>
+          <div class="gate-meta">
+            <span>静态出口 IP：<strong id="hero-ip">—</strong></span>
+            <span>归属地：<strong id="hero-geo">—</strong></span>
+            <span>隔离时区/语言：<strong id="hero-tz">—</strong></span>
+            <span>活跃 SSE 流：<strong id="hero-streams">0</strong></span>
+          </div>
+          <div class="gate-alert hidden" id="gate-alert"></div>
+        </div>
+        <div class="gate-actions">
+          <button class="btn btn-primary" id="btn-launch-desktop">启动隔离 Desktop</button>
+          <button class="btn btn-secondary" id="btn-launch-browser">打开隔离登录浏览器</button>
+          <button class="btn btn-secondary" id="btn-copy-cli">复制 CLI 命令</button>
+          <button class="btn btn-ghost" id="btn-recheck">重检出口</button>
+          <button class="btn btn-danger" id="btn-lock-toggle">紧急熔断</button>
+        </div>
+      </header>
+
+      <div id="toast" class="toast hidden" role="status"></div>
+
+      <!-- TAB 1: Overview & Doctor -->
+      <section class="tab-panel active" id="tab-overview">
+        <div class="grid-4">
+          <div class="card kpi-card">
+            <div class="kpi-label">安全放行请求</div>
+            <div class="kpi-value" id="kpi-proxied">0</div>
+            <div class="kpi-sub">经已验证静态 IP 转发</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">Fail-Closed 熔断拦截</div>
+            <div class="kpi-value accent-red" id="kpi-blocked-fc">0</div>
+            <div class="kpi-sub">异常时硬拒绝，零直连回退</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">遥测屏蔽盾拦截</div>
+            <div class="kpi-value accent-amber" id="kpi-blocked-tel">0</div>
+            <div class="kpi-sub">Sentry / Statsig / Segment</div>
+          </div>
+          <div class="card kpi-card">
+            <div class="kpi-label">宿主机直连告警</div>
+            <div class="kpi-value" id="kpi-direct-leaks">0</div>
+            <div class="kpi-sub">lsof 实时扫描 Anthropic CIDR</div>
+          </div>
+        </div>
+
+        <div class="grid-2-wide">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>网络与隔离关键检查 (<span id="doctor-crit-count">0 / 11</span> 通过)</h2>
+                <p class="muted">对标 Claude-Cage 11 项关键检查 + 本机 pf/OAuth/Split-IP 实测验证</p>
+              </div>
+              <div class="btn-row">
+                <button class="btn btn-ghost btn-sm" id="btn-copy-report">复制报告</button>
+                <button class="btn btn-secondary btn-sm" id="btn-pause-recheck">暂停外网并重检</button>
+                <button class="btn btn-primary btn-sm" id="btn-run-doctor">重新体检</button>
+              </div>
+            </div>
+            <div class="doctor-summary">
+              <div class="score-ring" id="doctor-ring">
+                <svg viewBox="0 0 100 100" width="96" height="96">
+                  <circle class="ring-bg" cx="50" cy="50" r="42" />
+                  <circle class="ring-fg" id="doctor-ring-fg" cx="50" cy="50" r="42" stroke-dasharray="264" stroke-dashoffset="264" />
+                </svg>
+                <div class="ring-text">
+                  <span id="doctor-score">--</span>
+                  <small>安全分</small>
+                </div>
+              </div>
+              <div class="doctor-info">
+                <div class="grade-badge" id="doctor-grade">检查中…</div>
+                <p class="muted" id="doctor-desc">点击“暂停外网并重检”先断开外网再逐项核验 11 项安全基线。</p>
+                <div class="btn-row" style="margin-top:8px;">
+                  <button class="btn btn-secondary btn-sm" id="btn-inspect-desktop">检测 Claude Desktop</button>
+                  <button class="btn btn-primary btn-sm hidden" id="btn-takeover-desktop">一键接管并隔离重开</button>
+                  <button class="btn btn-secondary btn-sm" id="btn-inspect-browser">检测浏览器指纹</button>
+                </div>
+              </div>
+            </div>
+            <div id="desktop-audit-box" class="gate-alert hidden" style="margin-bottom:12px;"></div>
+            <div class="check-list" id="doctor-checks"></div>
+          </div>
+
+          <div class="stack">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>快速启动与 CLI 用法</h2>
+                  <p class="muted">无需虚拟机，所有命令在 macOS 原生终端毫秒启动</p>
+                </div>
+              </div>
+              <div class="cmd-list">
+                <div class="cmd-item">
+                  <span>安全运行 Claude Code CLI</span>
+                  <code>peaceclaude cli</code>
+                </div>
+                <div class="cmd-item">
+                  <span>启动隔离版 Claude Desktop</span>
+                  <code>peaceclaude app</code>
+                </div>
+                <div class="cmd-item">
+                  <span>在隔离浏览器完成 OAuth 登录</span>
+                  <code>peaceclaude login-browser</code>
+                </div>
+                <div class="cmd-item">
+                  <span>查看 24h 直通与分流泄漏审计</span>
+                  <code>peaceclaude leaks --since 24h</code>
+                </div>
+                <div class="cmd-item">
+                  <span>403 / 断流根因三分诊</span>
+                  <code>peaceclaude diagnose</code>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>浏览器本地指纹自检 (FuckClaude 对标)</h2>
+                  <p class="muted">实时检测当前打开本页的浏览器环境信号；在隔离登录浏览器中访问本页应全部呈绿灯</p>
+                </div>
+              </div>
+              <div class="fp-grid" id="browser-fp-grid"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: Profiles & Rules -->
+      <section class="tab-panel" id="tab-profiles">
+        <div class="grid-2-wide">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>隔离档案 (Profiles)</h2>
+                <p class="muted">每个档案独立隔离 CLAUDE_CONFIG_DIR、Desktop user-data-dir、登录浏览器与设备指纹</p>
+              </div>
+            </div>
+            <form class="inline-form" id="form-create-profile">
+              <input type="text" id="new-profile-name" placeholder="档案名 (如 us-work-1)" required pattern="[a-zA-Z0-9][a-zA-Z0-9._-]{0,47}" />
+              <input type="text" id="new-profile-note" placeholder="备注 (如 Webshare US 独享号)" />
+              <button type="submit" class="btn btn-primary btn-sm">创建档案</button>
+            </form>
+            <div class="profile-list" id="profile-list"></div>
+          </div>
+
+          <div class="stack">
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>全局规则共享 (Shared Rules)</h2>
+                  <p class="muted">对标 ReClaude `rules`：身份隔离，但跨档案共用一份 CLAUDE.md / skills / agents / hooks</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" id="toggle-shared-rules" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="kv-list" id="rules-status-box"></div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <div>
+                  <h2>安全指纹清理结果</h2>
+                  <p class="muted">自动归档备份到 ~/.peaceclaude/backups/，绝不误删 CLAUDE.md 与 skills</p>
+                </div>
+              </div>
+              <pre class="code-box" id="clean-output">点击任意档案的“盘点清理(Dry-Run)”或“执行指纹清理”查看精确计划与结果。</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: Leaks Audit -->
+      <section class="tab-panel" id="tab-leaks">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>直通与泄漏审计 (Leaks)</h2>
+              <p class="muted">追踪 Split-IP 风险域名、Fail-Closed 拦截记录、遥测屏蔽记录及宿主机直连 Anthropic Socket</p>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-leaks">刷新</button>
+              <button class="btn btn-ghost btn-sm" id="btn-clear-leaks">清空记录</button>
+            </div>
+          </div>
+          <div class="host-sockets-banner" id="host-sockets-banner"></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>类型</th>
+                  <th>目标主机</th>
+                  <th>动作</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody id="leaks-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: Sanitized Capture -->
+      <section class="tab-panel" id="tab-capture">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>本地脱敏抓包 (Capture)</h2>
+              <p class="muted">仅记录域名/路径/状态码/耗时/脱敏头，Authorization / Cookie / API Key 强制替换为 [REDACTED]</p>
+            </div>
+            <div class="btn-row">
+              <label class="switch-label">
+                <span>开启抓包</span>
+                <label class="switch">
+                  <input type="checkbox" id="toggle-capture" />
+                  <span class="slider"></span>
+                </label>
+              </label>
+              <button class="btn btn-secondary btn-sm" id="btn-refresh-capture">刷新</button>
+              <button class="btn btn-ghost btn-sm" id="btn-clear-capture">清空</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>时间</th>
+                  <th>协议</th>
+                  <th>目标</th>
+                  <th>分类</th>
+                  <th>动作</th>
+                  <th>状态</th>
+                  <th>出口 IP</th>
+                  <th>耗时</th>
+                </tr>
+              </thead>
+              <tbody id="capture-tbody"></tbody>
+            </table>
+          </div>
+          <div class="capture-detail hidden" id="capture-detail">
+            <div class="detail-head">
+              <strong>抓包详情（已脱敏）</strong>
+              <button class="btn btn-ghost btn-sm" id="btn-close-detail">关闭</button>
+            </div>
+            <pre class="code-box" id="capture-detail-json"></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 5: Diagnose & pf Defense -->
+      <section class="tab-panel" id="tab-diagnose">
+        <div class="grid-2-wide">
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>403 / 断流智能三分诊 (Diagnose)</h2>
+                <p class="muted">基于真实日志与核心端点探测，精准区分 network / auth / unknown，避免网络抖动误点 Sign Out</p>
+              </div>
+              <button class="btn btn-primary btn-sm" id="btn-run-diagnose">运行分诊</button>
+            </div>
+            <div id="diagnose-result" class="diagnose-box">
+              <p class="muted">点击“运行分诊”实时探测 api.anthropic.com / claude.ai / platform.claude.com 并分析日志证据。</p>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <div>
+                <h2>macOS 内核 pf Kill-Switch 与 Cowork vm-proxy</h2>
+                <p class="muted">封死宿主机及 Cowork VM 绕过代理直连 Anthropic CIDR 的最后一公里</p>
+              </div>
+            </div>
+            <div id="vmproxy-box" class="kv-list"></div>
+            <div class="section-sep">
+              <div class="small-label">激活内核级防直连（在终端执行，自动校验语法且不清空企业飞连规则）：</div>
+              <pre class="code-box" id="pf-install-cmd">sudo bash ~/.peaceclaude/state/pf/install-pf.sh</pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 6: Settings -->
+      <section class="tab-panel" id="tab-settings">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>上游静态 IP 与安全策略配置</h2>
+              <p class="muted">支持复用本机 Clash Verge (127.0.0.1:7897) 或直连 Webshare SOCKS5/HTTP 彻底消除 Split-IP</p>
+            </div>
+          </div>
+          <form id="form-settings" class="settings-grid">
+            <div class="field">
+              <label>上游代理模式</label>
+              <select id="cfg-upstream-mode">
+                <option value="local-proxy">local-proxy（接管本机 Clash Verge / 本地代理）</option>
+                <option value="direct-socks5">direct-socks5（直连 Webshare SOCKS5，推荐零 Split-IP）</option>
+                <option value="direct-http">direct-http（直连 HTTP 代理）</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>上游地址 (host:port)</label>
+              <input type="text" id="cfg-upstream-addr" placeholder="127.0.0.1:7897 或 198.51.100.10:6331" required />
+            </div>
+            <div class="field">
+              <label>上游用户名（留空保持原值）</label>
+              <input type="text" id="cfg-upstream-user" autocomplete="off" placeholder="仅直连 Webshare 时需要" />
+            </div>
+            <div class="field">
+              <label>上游密码（永不回显，留空保持原值）</label>
+              <input type="password" id="cfg-upstream-pass" autocomplete="new-password" placeholder="••••••••" />
+            </div>
+            <div class="field">
+              <label>锁定预期静态 IP (Expected IP)</label>
+              <input type="text" id="cfg-expected-ip" placeholder="例如 198.51.100.10（不匹配即刻熔断）" />
+            </div>
+            <div class="field">
+              <label>允许国家代码（逗号分隔）</label>
+              <input type="text" id="cfg-allowed-countries" placeholder="US" />
+            </div>
+            <div class="field">
+              <label>伪装语言 (--lang)</label>
+              <input type="text" id="cfg-language" placeholder="en-US" />
+            </div>
+            <div class="field">
+              <label>手动覆盖时区（留空则随静态 IP GeoIP 自动同步）</label>
+              <input type="text" id="cfg-timezone" placeholder="留空自动同步 (如 America/Denver)" />
+            </div>
+
+            <div class="checkbox-group full-span">
+              <label><input type="checkbox" id="cfg-fail-closed" /> Fail-Closed 硬熔断（出口异常立即阻断，绝不回退直连）</label>
+              <label><input type="checkbox" id="cfg-sync-tz" /> 自动根据静态 IP 归属地同步 IANA 时区</label>
+              <label><input type="checkbox" id="cfg-telemetry-shield" /> 遥测屏蔽盾（拦截 Sentry / Statsig / Segment）</label>
+              <label><input type="checkbox" id="cfg-strict-split" /> local-proxy 模式下开启严格域名隔离（阻断非 Claude 公网 Split-IP）</label>
+              <label><input type="checkbox" id="cfg-skip-sse" /> 活跃 Claude SSE 长流期间避让外部探测（防住宅代理 RST）</label>
+              <label><input type="checkbox" id="cfg-strip-host-env" /> CLI 启动时剥离宿主机 ANTHROPIC_BASE_URL 等中转污染变量</label>
+              <label><input type="checkbox" id="cfg-corp-direct" /> 放行公司内网白名单直连（不干扰飞连 / 内网开发）</label>
+              <label><input type="checkbox" id="cfg-vm-proxy" /> 启用 macOS Cowork VM 代理访问白名单 (192.168.64.0/24)</label>
+              <label><input type="checkbox" id="cfg-auto-peace" /> 误点原生 Claude.app 时自动关闭并以安全隔离模式重开 (Auto-Peace)</label>
+            </div>
+
+            <div class="full-span btn-row">
+              <button type="submit" class="btn btn-primary">保存并立即热生效</button>
+              <span class="muted" id="cfg-cred-hint"></span>
+            </div>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
