@@ -21,6 +21,7 @@ import (
 	"peaceclaude/internal/egress"
 	"peaceclaude/internal/host"
 	"peaceclaude/internal/profile"
+	"peaceclaude/internal/version"
 )
 
 //go:embed app_macos.swift
@@ -410,25 +411,73 @@ func TerminatePIDs(pids []string, wait time.Duration) int {
 	return len(numeric)
 }
 
-// InstallDesktopLauncherApp builds `/Applications/PeaceClaude.app` (or ~/Applications fallback)
-// as a native Swift/WKWebView management console app (falling back to shell launcher if swiftc is unavailable).
-func InstallDesktopLauncherApp(binPath string) (string, error) {
-	targetDir := "/Applications"
-	if f, err := os.CreateTemp(targetDir, ".peaceclaude-write-test-*"); err == nil {
-		_ = f.Close()
-		_ = os.Remove(f.Name())
-	} else {
-		home, _ := os.UserHomeDir()
-		targetDir = filepath.Join(home, "Applications")
-		if err := os.MkdirAll(targetDir, 0o755); err != nil {
-			return "", err
-		}
+// cfBundleBuildVersion normalizes a semver string into a pure numeric CFBundleVersion.
+func cfBundleBuildVersion(ver string) string {
+	v := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ver), "v"))
+	if idx := strings.IndexByte(v, '-'); idx >= 0 {
+		v = v[:idx]
 	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "0.2.0"
+	}
+	return v
+}
 
-	// Clean up legacy launcher names if present so there is one unambiguous PeaceClaude.app in /Applications.
-	_ = os.RemoveAll(filepath.Join(targetDir, "CageClaude.app"))
-	_ = os.RemoveAll(filepath.Join(targetDir, "Claude (cageclaude).app"))
-	_ = os.RemoveAll(filepath.Join(targetDir, "Claude (peaceclaude).app"))
+func isPathWithin(path, parent string) bool {
+	cleanPath := filepath.Clean(path)
+	cleanParent := filepath.Clean(parent)
+	return cleanPath == cleanParent || strings.HasPrefix(cleanPath, cleanParent+string(filepath.Separator))
+}
+
+func copyExecutableFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".peaceclaude-bin-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
+// InstallDesktopLauncherAppTo builds a self-contained `PeaceClaude.app` inside targetDir,
+// embedding the Go CLI at `Contents/Resources/bin/peaceclaude` when available.
+func InstallDesktopLauncherAppTo(binPath, targetDir string) (string, error) {
+	if strings.TrimSpace(targetDir) == "" {
+		return "", fmt.Errorf("目标目录不能为空")
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return "", err
+	}
 
 	appDir := filepath.Join(targetDir, "PeaceClaude.app")
 	contents := filepath.Join(appDir, "Contents")
@@ -458,6 +507,23 @@ func InstallDesktopLauncherApp(binPath string) (string, error) {
 		}
 	}
 
+	bundledCLIPath := filepath.Join(resDir, "bin", "peaceclaude")
+	hasBundledCLI := false
+	if cleanBin := strings.TrimSpace(binPath); cleanBin != "" && !isPathWithin(cleanBin, appDir) {
+		if fi, err := os.Stat(cleanBin); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0 {
+			if err := copyExecutableFile(cleanBin, bundledCLIPath); err != nil {
+				return "", fmt.Errorf("embed peaceclaude binary: %w", err)
+			}
+			hasBundledCLI = true
+		}
+	}
+
+	shortVer := strings.TrimSpace(version.Version)
+	if shortVer == "" {
+		shortVer = "0.2.0"
+	}
+	bundleVer := cfBundleBuildVersion(shortVer)
+
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -479,9 +545,9 @@ func InstallDesktopLauncherApp(binPath string) (string, error) {
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>1.0</string>
+  <string>%s</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>%s</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSAppTransportSecurity</key>
@@ -491,17 +557,49 @@ func InstallDesktopLauncherApp(binPath string) (string, error) {
   </dict>
 </dict>
 </plist>
-`, execName)
+`, execName, shortVer, bundleVer)
 	if err := os.WriteFile(filepath.Join(contents, "Info.plist"), []byte(plist), 0o644); err != nil {
 		return "", err
 	}
 
 	// Generate crisp custom shield-lock icon (.icns)
 	_ = generateAppIcon(filepath.Join(resDir, "AppIcon.icns"))
-	if execName == "PeaceClaude" {
-		if codesign, err := exec.LookPath("codesign"); err == nil {
-			_ = exec.Command(codesign, "--force", "--deep", "--sign", "-", appDir).Run()
+
+	if codesign, err := exec.LookPath("codesign"); err == nil {
+		if hasBundledCLI {
+			_ = exec.Command(codesign, "--force", "--sign", "-", bundledCLIPath).Run()
 		}
+		if execName == "PeaceClaude" {
+			_ = exec.Command(codesign, "--force", "--sign", "-", nativeBinPath).Run()
+		}
+		_ = exec.Command(codesign, "--force", "--deep", "--sign", "-", appDir).Run()
+	}
+	return appDir, nil
+}
+
+// InstallDesktopLauncherApp builds `/Applications/PeaceClaude.app` (or ~/Applications fallback)
+// as a native Swift/WKWebView management console app (falling back to shell launcher if swiftc is unavailable).
+func InstallDesktopLauncherApp(binPath string) (string, error) {
+	targetDir := "/Applications"
+	if f, err := os.CreateTemp(targetDir, ".peaceclaude-write-test-*"); err == nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+	} else {
+		home, _ := os.UserHomeDir()
+		targetDir = filepath.Join(home, "Applications")
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+			return "", err
+		}
+	}
+
+	// Clean up legacy launcher names if present so there is one unambiguous PeaceClaude.app in /Applications.
+	_ = os.RemoveAll(filepath.Join(targetDir, "CageClaude.app"))
+	_ = os.RemoveAll(filepath.Join(targetDir, "Claude (cageclaude).app"))
+	_ = os.RemoveAll(filepath.Join(targetDir, "Claude (peaceclaude).app"))
+
+	appDir, err := InstallDesktopLauncherAppTo(binPath, targetDir)
+	if err != nil {
+		return "", err
 	}
 	// Register with LaunchServices so Spotlight & Applications show PeaceClaude immediately
 	_ = exec.Command("touch", appDir).Run()

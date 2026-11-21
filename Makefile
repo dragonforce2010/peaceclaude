@@ -5,7 +5,7 @@ VERSION := $(shell cat VERSION 2>/dev/null || echo 0.1.0)
 COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X peaceclaude/internal/version.Version=$(VERSION) -X peaceclaude/internal/version.Commit=$(COMMIT)
 
-.PHONY: all build test test-race install regression clean
+.PHONY: all build test test-race install regression package dist-clean clean
 
 all: build
 
@@ -28,6 +28,12 @@ install: build
 
 regression: build
 	./scripts/regression-test.sh
+
+package:
+	./scripts/package-release.sh
+
+dist-clean:
+	rm -rf dist
 
 clean:
 	rm -rf bin

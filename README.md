@@ -28,6 +28,22 @@
 
 ## 快速安装
 
+### 方式 A：下载 Release 安装包（免 Go 环境，支持 Apple Silicon & Intel）
+
+前往 GitHub Releases 下载对应版本的离线通用包：
+- **图形化镜像包**：`PeaceClaude-v<VERSION>-macos-universal.dmg`
+  1. 双击打开 DMG，将 `PeaceClaude.app` 拖入 `Applications`；
+  2. 双击镜像内的 `Install-PeaceClaude-CLI.command` 一键安装 `peaceclaude` / `pclaude` 命令并启动后台安全网关（已有 `~/.peaceclaude` 账号数据会完整保留）。
+- **命令行离线包**：`peaceclaude-v<VERSION>-macos-universal.tar.gz`
+  ```bash
+  tar -xzf peaceclaude-v<VERSION>-macos-universal.tar.gz
+  cd peaceclaude-v<VERSION>-macos-universal
+  ./install.sh
+  ```
+> 如 macOS 首次提示无法验证开发者，执行 `xattr -dr com.apple.quarantine /Applications/PeaceClaude.app` 后再打开即可；安装或升级均可核对同目录 `SHA256SUMS.txt`（`shasum -a 256 -c SHA256SUMS.txt`）。
+
+### 方式 B：从源码编译安装（需 Go 1.24+）
+
 ```bash
 chmod +x ./install.sh
 ./install.sh

@@ -180,18 +180,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         return ok
     }
 
+    private func bundledCLIBinary() -> String? {
+        guard let resURL = Bundle.main.resourceURL else { return nil }
+        let path = resURL.appendingPathComponent("bin/peaceclaude").path
+        return FileManager.default.isExecutableFile(atPath: path) ? path : nil
+    }
+
+    private func configPath() -> String {
+        let envHome = ProcessInfo.processInfo.environment["PEACECLAUDE_HOME"] ?? ""
+        let baseDir = envHome.isEmpty ? (NSHomeDirectory() + "/.peaceclaude") : envHome
+        return baseDir + "/config.json"
+    }
+
     private func startDaemonCLI() {
         let candidates = [
             NSHomeDirectory() + "/.local/bin/peaceclaude",
             "/opt/homebrew/bin/peaceclaude",
             "/usr/local/bin/peaceclaude"
         ]
-        guard let bin = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+        guard let bin = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? bundledCLIBinary() else {
             return
         }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: bin)
-        proc.arguments = ["service", "start"]
+        if FileManager.default.fileExists(atPath: configPath()) {
+            proc.arguments = ["service", "start"]
+        } else {
+            proc.arguments = ["setup", "--no-app"]
+        }
         try? proc.run()
         proc.waitUntilExit()
     }

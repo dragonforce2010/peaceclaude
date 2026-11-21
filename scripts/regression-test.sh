@@ -472,6 +472,21 @@ PY
   fi
 fi
 
+# 16c. Self-contained Desktop .app bundle generation & embedded CLI version check
+STAGE_APP_DIR="${TMP_HOME}/stage-app"
+mkdir -p "$STAGE_APP_DIR"
+APP_INSTALL_OUT="$("$BIN" app install --dir "$STAGE_APP_DIR")"
+APP_BUNDLE="${STAGE_APP_DIR}/PeaceClaude.app"
+REPO_VER="$(tr -d '[:space:]' < "${ROOT}/VERSION")"
+if [[ -d "$APP_BUNDLE" ]] \
+  && grep -q "<string>${REPO_VER}</string>" "${APP_BUNDLE}/Contents/Info.plist" \
+  && [[ -x "${APP_BUNDLE}/Contents/Resources/bin/peaceclaude" ]] \
+  && [[ "$("${APP_BUNDLE}/Contents/Resources/bin/peaceclaude" --version)" == "peaceclaude ${REPO_VER} "* ]]; then
+  ok "desktop_bundle_self_contained" "PeaceClaude.app embeds Info.plist=${REPO_VER} and executable Resources/bin/peaceclaude"
+else
+  fail "desktop_bundle_self_contained" "app bundle check failed ($APP_INSTALL_OUT)"
+fi
+
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes
 if ps -axo command= | grep -F "$TMP_HOME" | grep -qv grep; then
   fail "sandbox_zero_desktop_interference" "sandbox regression spawned unexpected process referencing $TMP_HOME"

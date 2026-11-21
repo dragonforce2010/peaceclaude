@@ -61,8 +61,12 @@ fi
 echo "→ 运行 peaceclaude setup..."
 if [ "$NO_LAUNCHD" = "1" ]; then
   "$INSTALL_DIR/peaceclaude" setup --no-launchd
+  echo "→ 重启本地守护网关以生效新版本..."
+  "$INSTALL_DIR/peaceclaude" service restart --no-launchd
 else
   "$INSTALL_DIR/peaceclaude" setup
+  echo "→ 重启本地守护网关以生效新版本..."
+  "$INSTALL_DIR/peaceclaude" service restart
 fi
 
 echo ""

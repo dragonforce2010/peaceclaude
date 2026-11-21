@@ -194,6 +194,7 @@ func cmdApp(args []string) error {
 	}
 	fs := flag.NewFlagSet("app", flag.ContinueOnError)
 	profName := fs.String("profile", "", "指定隔离档案名")
+	dir := fs.String("dir", "", "指定安装 .app 的目标目录（默认 /Applications，用于离线打包）")
 	dryRun := fs.Bool("dry-run", false, "仅打印启动参数，不实际启动")
 	yes := fs.Bool("yes", false, "跳过确认提示")
 	if err := fs.Parse(rest); err != nil {
@@ -214,7 +215,15 @@ func cmdApp(args []string) error {
 			spec.Profile, pid, spec.DataDir, cfg.HTTPProxyURL())
 		return nil
 	case "install":
-		appPath, err := launcher.InstallDesktopLauncherApp(selfBinary())
+		var (
+			appPath string
+			err     error
+		)
+		if targetDir := strings.TrimSpace(*dir); targetDir != "" {
+			appPath, err = launcher.InstallDesktopLauncherAppTo(selfBinary(), targetDir)
+		} else {
+			appPath, err = launcher.InstallDesktopLauncherApp(selfBinary())
+		}
 		if err != nil {
 			return err
 		}

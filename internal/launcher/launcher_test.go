@@ -5,12 +5,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"peaceclaude/internal/config"
 	"peaceclaude/internal/egress"
 	"peaceclaude/internal/profile"
+	"peaceclaude/internal/version"
 )
 
 func TestBuildIsolatedEnvStripsHostPollutionAndInjectsPeace(t *testing.T) {
@@ -253,5 +255,59 @@ func TestBrowserPrivacyPrefsOverwritesChineseAndGeneratesValidShieldExtension(t 
 	}
 	if supportsCDPShieldBrowser("/Applications/Arc.app/Contents/MacOS/Arc") {
 		t.Fatalf("expected Arc to skip CDP shield")
+	}
+}
+
+func TestCFBundleBuildVersionAndSelfContainedAppBundle(t *testing.T) {
+	cases := map[string]string{
+		"0.2.0":       "0.2.0",
+		"v0.2.0-rc.1": "0.2.0",
+		"":            "0.2.0",
+		"  ":          "0.2.0",
+	}
+	for in, want := range cases {
+		if got := cfBundleBuildVersion(in); got != want {
+			t.Fatalf("cfBundleBuildVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	tmp := t.TempDir()
+	fakeBin := filepath.Join(tmp, "peaceclaude-fake")
+	fakeContent := "#!/bin/sh\necho fake-peaceclaude\n"
+	if err := os.WriteFile(fakeBin, []byte(fakeContent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stageDir := filepath.Join(tmp, "apps")
+	appDir, err := InstallDesktopLauncherAppTo(fakeBin, stageDir)
+	if err != nil {
+		t.Fatalf("InstallDesktopLauncherAppTo: %v", err)
+	}
+	plistBytes, err := os.ReadFile(filepath.Join(appDir, "Contents", "Info.plist"))
+	if err != nil {
+		t.Fatalf("read Info.plist: %v", err)
+	}
+	plistStr := string(plistBytes)
+	if !strings.Contains(plistStr, "<string>"+version.Version+"</string>") {
+		t.Fatalf("Info.plist missing version %q: %s", version.Version, plistStr)
+	}
+	bundledBin := filepath.Join(appDir, "Contents", "Resources", "bin", "peaceclaude")
+	info, err := os.Stat(bundledBin)
+	if err != nil {
+		t.Fatalf("expected bundled CLI at %s: %v", bundledBin, err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("expected bundled CLI executable, mode=%v", info.Mode())
+	}
+	gotContent, err := os.ReadFile(bundledBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotContent) != fakeContent {
+		t.Fatalf("bundled CLI content mismatch")
+	}
+	if runtime.GOOS == "darwin" {
+		if _, err := os.Stat(filepath.Join(appDir, "Contents", "Resources", "AppIcon.icns")); err != nil {
+			t.Fatalf("expected AppIcon.icns on macOS: %v", err)
+		}
 	}
 }
