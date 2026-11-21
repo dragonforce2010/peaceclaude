@@ -77,6 +77,7 @@ type ShieldConfig struct {
 	BlockPrivateTargets  bool     `json:"block_private_targets"`
 	AllowCorporateDirect bool     `json:"allow_corporate_direct"`
 	ProxyAuthDomains     bool     `json:"proxy_auth_domains"`
+	ProtectedBrowsers    []string `json:"protected_browsers,omitempty"`
 	CorporateDomains     []string `json:"corporate_domains,omitempty"`
 	ExtraBlockedDomains  []string `json:"extra_blocked_domains,omitempty"`
 	ExtraClaudeDomains   []string `json:"extra_claude_domains,omitempty"`
@@ -256,7 +257,9 @@ func CaptureLogPath() string   { return filepath.Join(LogsDir(), "capture.jsonl"
 func AppLauncherLog() string   { return filepath.Join(LogsDir(), "launcher-app.log") }
 func DaemonPIDPath() string    { return filepath.Join(RunDir(), "daemon.pid") }
 func GeoCachePath() string     { return filepath.Join(StateDir(), "geo-cache.json") }
-func PFDir() string            { return filepath.Join(StateDir(), "pf") }
+func PFDir() string                     { return filepath.Join(StateDir(), "pf") }
+func ExtensionsDir() string             { return filepath.Join(BaseDir(), "extensions") }
+func NativeBrowserShieldDir() string    { return filepath.Join(ExtensionsDir(), "native-browser-shield") }
 
 func EnsureDirs() error {
 	dirs := []string{
@@ -268,6 +271,7 @@ func EnsureDirs() error {
 		StateDir(),
 		RunDir(),
 		PFDir(),
+		ExtensionsDir(),
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0o700); err != nil {

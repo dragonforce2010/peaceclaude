@@ -70,6 +70,8 @@ func run(args []string) error {
 		return cmdLoginBrowser(rest)
 	case "browser-pac", "pac":
 		return cmdBrowserPAC(rest)
+	case "browser-shield", "shield":
+		return cmdBrowserShield(rest)
 	case "ui", "dashboard":
 		return cmdUI(rest)
 	case "service":
@@ -119,6 +121,7 @@ func printUsage() {
   app [run|takeover|reset|install] [--profile P] 启动隔离版 Claude Desktop / 自动接管原生窗口 / 管理启动器
   login-browser [--profile P] [url]              打开隔离登录浏览器（独立 Cookie + 静态 IP + 美区时区/语言）
   browser-pac [status|on|off] [--dry-run]        让普通浏览器 (Chrome/Safari/Arc/Edge) 访问 Claude 自动走静态 IP 门禁
+  browser-shield [status|sync|open]              生成/检查原生浏览器定向 MV3 护航扩展（仅护 Claude & 测试域）
   ui                                             打开本地可视化控制台 (http://127.0.0.1:18899)
 
 隔离档案与规则:
@@ -370,6 +373,80 @@ func cmdBrowserPAC(args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("未知 browser-pac 子命令 %q (可用: status | on | off)", sub)
+	}
+}
+
+func cmdBrowserShield(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	sub := "status"
+	rest := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub = args[0]
+		rest = args[1:]
+	}
+	fs := flag.NewFlagSet("browser-shield", flag.ContinueOnError)
+	browserID := fs.String("browser", "arc", "目标原生浏览器 ID (arc/chrome/brave/edge/chromium/vivaldi)")
+	asJSON := fs.Bool("json", false, "输出 JSON")
+	if err := fs.Parse(rest); err != nil {
+		return err
+	}
+
+	var gate egress.GateSnapshot
+	if ok, _ := launcher.DaemonHealth(cfg); ok {
+		if snap, err := launcher.FetchGateSnapshot(context.Background(), cfg, false); err == nil {
+			gate = snap
+		}
+	}
+
+	extDir, err := launcher.EnsureNativeBrowserShield(cfg, gate)
+	if err != nil {
+		return err
+	}
+
+	switch sub {
+	case "sync":
+		if *asJSON {
+			printJSON(map[string]any{"ok": true, "extension_dir": extDir})
+			return nil
+		}
+		fmt.Printf("✔ 已生成并同步原生浏览器定向护航扩展: %s\n", extDir)
+		return nil
+	case "status":
+		rep := launcher.InspectNativeBrowsers(cfg, host.InspectBrowserPAC(cfg), gate)
+		if *asJSON {
+			printJSON(rep)
+			return nil
+		}
+		fmt.Printf("扩展目录:   %s (就绪: %t)\n", rep.ExtensionDir, rep.ExtensionReady)
+		fmt.Printf("系统 PAC:   %t\n", rep.PACEnabled)
+		fmt.Printf("目标指纹:   %s · %s\n", rep.TargetTimezone, rep.TargetLocale)
+		fmt.Printf("护航域名:   %s\n", strings.Join(rep.ProtectedDomains, ", "))
+		for _, b := range rep.Browsers {
+			if !b.Installed {
+				continue
+			}
+			fmt.Printf("  - %-14s [%-12s] 扩展=%t 启用=%t %s\n", b.Name, b.ProtectionLevel, b.ExtensionLoaded, b.ExtensionEnabled, b.Note)
+		}
+		return nil
+	case "open", "guide":
+		res, err := launcher.OpenNativeBrowserExtensionGuide(*browserID, extDir)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			printJSON(res)
+			return nil
+		}
+		fmt.Printf("✔ %s\n", res.Message)
+		for i, step := range res.Steps {
+			fmt.Printf("  %d. %s\n", i+1, step)
+		}
+		return nil
+	default:
+		return fmt.Errorf("未知 browser-shield 子命令 %q (可用: status | sync | open)", sub)
 	}
 }
 

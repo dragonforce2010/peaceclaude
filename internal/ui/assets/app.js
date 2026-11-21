@@ -429,6 +429,7 @@
     if (tab === 'leaks') loadLeaks();
     if (tab === 'capture') loadCaptures();
     if (tab === 'remote') loadRemote();
+    if (tab === 'network') loadNativeBrowsers();
     if (tab === 'appearance') renderAppearanceUI();
   }
 
@@ -650,14 +651,12 @@
   }
   function freeUsageNoticeHTML(a) {
     const usage = a.usage || {};
-    const reason = usage.hint || usage.note || '免费账号（Free）无固定 5h / Weekly 付费配额窗口，按会话波动限流';
+    const reason = usage.hint || usage.note || '按会话动态限流，升级 Pro / Max 后自动采集实时 5h / Weekly 用量进度';
     return `
-      <div class="free-usage-notice">
-        <div class="free-usage-notice-title">
-          <span>免费账号（Free）无 5h / Weekly 付费配额</span>
-          <span class="plan-badge tier-free">Free</span>
-        </div>
-        <div class="free-usage-notice-desc">${esc(reason)}</div>
+      <div class="free-usage-strip">
+        <span class="free-strip-title">免费账号（Free）无 5h / Weekly 付费配额</span>
+        <span class="free-strip-sep" aria-hidden="true">·</span>
+        <span class="free-strip-desc">${esc(reason)}</span>
       </div>`;
   }
   function freeUsageRosterHTML() {
@@ -716,7 +715,7 @@
 
       $('account-hero-slot').innerHTML = `
         <article class="card hero-account-card ${hero.active ? 'is-current-account' : ''}" data-acc-card="${esc(hero.name)}">
-          <div class="hero-account-left">
+          <div class="hero-card-header">
             <div class="account-title-wrap">
               <div class="avatar-circle lg" title="点击「详情与编辑」可切换 9 款 3D 动物头像">${avatarMediaHTML(hero)}</div>
               <div style="min-width:0; flex:1;">
@@ -733,24 +732,26 @@
                 <div class="account-sub">${esc(subText)}</div>
               </div>
             </div>
-
-            <div class="hero-meta-grid">
-              <div><small>账号 ID / 订阅</small><span>${esc(idShort)}${acct.billing_type ? ' · ' + esc(billingLabel(acct.billing_type)) : ''}</span></div>
-              <div><small>注册资历 / 来源</small><span>${esc(regText)} · ${esc(usageSrc)}</span></div>
-              <div><small>Desktop 进程</small><span class="mono">${hero.running_desktop_pid ? 'PID ' + esc(hero.running_desktop_pid) : '未启动'}</span></div>
-              <div><small>隔离设备指纹</small><span class="mono">${esc((hero.fingerprint?.device_uuid || '—').slice(0, 12))}</span></div>
-            </div>
-          </div>
-
-          <div class="hero-account-right">
-            <div class="usage-bars-stack">
-              ${isFree ? freeUsageNoticeHTML(hero) : `${usageBarHTML(usage.five_hour, '5-Hour Limit')}${usageBarHTML(usage.weekly, 'Weekly · All Models')}`}
-            </div>
-            <div class="btn-row">
+            <div class="hero-primary-actions">
               <button class="btn ${hero.running_desktop_pid || !otherRunning ? 'btn-primary' : 'btn-accent'} btn-sm" data-acc-desktop="${esc(hero.name)}" type="button">${esc(deskLabel)}</button>
               ${hero.running_desktop_pid ? `<button class="btn btn-ghost btn-sm" data-acc-stop="${esc(hero.name)}" type="button">停止</button>` : ''}
               <button class="btn btn-secondary btn-sm" data-acc-browser="${esc(hero.name)}" type="button">隔离浏览器登录</button>
-              <button class="btn btn-secondary btn-sm" data-acc-detail="${esc(hero.name)}" type="button">详情与编辑</button>
+            </div>
+          </div>
+
+          <div class="hero-quota-band">
+            ${isFree ? freeUsageNoticeHTML(hero) : `<div class="usage-bars-grid">${usageBarHTML(usage.five_hour, '5-Hour Limit')}${usageBarHTML(usage.weekly, 'Weekly · All Models')}</div>`}
+          </div>
+
+          <div class="hero-card-footer">
+            <div class="hero-telemetry-strip">
+              <div class="hero-tele-item"><small>账号 ID / 订阅</small><span>${esc(idShort)}${acct.billing_type ? ' · ' + esc(billingLabel(acct.billing_type)) : ''}</span></div>
+              <div class="hero-tele-item"><small>注册资历 / 来源</small><span>${esc(regText)} · ${esc(usageSrc)}</span></div>
+              <div class="hero-tele-item"><small>Desktop 进程</small><span class="mono">${hero.running_desktop_pid ? 'PID ' + esc(hero.running_desktop_pid) : '未启动'}</span></div>
+              <div class="hero-tele-item"><small>隔离设备指纹</small><span class="mono">${esc((hero.fingerprint?.device_uuid || '—').slice(0, 12))}</span></div>
+            </div>
+            <div class="hero-secondary-actions">
+              <button class="btn btn-ghost btn-sm" data-acc-detail="${esc(hero.name)}" type="button">详情与编辑</button>
               <button class="btn btn-ghost btn-sm" data-acc-cli="${esc(hero.name)}" type="button">复制 CLI</button>
               ${hero.name !== 'default' ? `<button class="btn btn-danger-ghost btn-sm" data-acc-delete="${esc(hero.name)}" type="button">删除</button>` : ''}
             </div>
@@ -957,7 +958,7 @@
     }
 
     $('doctor-checks').innerHTML = (doc.checks || []).map((c) => {
-      const fixText = c.fix_hint || c.remediation || '';
+      const fixText = c.status !== 'pass' ? (c.fix_hint || c.remediation || '') : '';
       const canFix = c.status !== 'pass' && c.fixable && c.fix_action;
       return `
       <div class="check-row">
@@ -1129,6 +1130,70 @@
 
   async function loadRemote() {
     try { renderRemote(await api('/api/remote')); } catch (e) { toast('读取远程配对状态失败: ' + e.message); }
+  }
+
+  let nativeBrowsersData = null;
+  let lastGuideExtURL = '';
+
+  function renderNativeBrowsers(rep) {
+    nativeBrowsersData = rep;
+    const grid = $('nb-browser-grid');
+    const meta = $('nb-meta-line');
+    if (!grid || !meta || !rep) return;
+
+    const pacBadge = rep.pac_enabled
+      ? '<span class="status-tag pass">PAC 已开启</span>'
+      : '<span class="status-tag warn">PAC 未开启</span>';
+    const domains = (rep.protected_domains || []).join(' · ');
+    meta.innerHTML = `
+      ${pacBadge}
+      <span>目标指纹：<code>${esc(rep.target_timezone || 'America/Denver')}</code> · <code>${esc(rep.target_locale || 'en-US')}</code></span>
+      <span>护航域：<code>${esc(domains)}</code></span>
+      <span>扩展目录：<code>${esc(rep.extension_dir || '')}</code></span>`;
+
+    const installed = (rep.browsers || []).filter((b) => b.installed);
+    const list = installed.length ? installed : (rep.browsers || []);
+    const anySaved = list.some((b) => !!b.selected);
+
+    grid.innerHTML = list.map((b) => {
+      const checked = anySaved ? !!b.selected : (b.installed && b.supports_extension);
+      let stClass = 'warn';
+      let stText = '未护航';
+      if (b.protection_level === 'full') {
+        stClass = 'pass';
+        stText = '全链路已护航';
+      } else if (b.protection_level === 'network_only') {
+        stClass = b.supports_extension ? 'warn' : 'muted-tag';
+        stText = b.supports_extension ? '仅网络层 · 待载入扩展' : '仅支持网络层 PAC';
+      } else if (!b.installed) {
+        stClass = 'muted-tag';
+        stText = '未安装';
+      }
+      const profs = (b.loaded_profiles && b.loaded_profiles.length)
+        ? `<div class="nb-card-profs">已生效配置档：<code>${esc(b.loaded_profiles.join(', '))}</code></div>`
+        : '';
+      const guideBtn = b.installed && b.supports_extension
+        ? `<button type="button" class="btn btn-secondary btn-sm" data-nb-guide="${esc(b.id)}">${b.extension_enabled ? '查看扩展目录' : '打开目录并引导载入'}</button>`
+        : `<span class="muted" style="font-size:11.5px;">${b.supports_extension ? '请先安装此浏览器' : '不支持 Chromium 扩展'}</span>`;
+
+      return `
+        <div class="nb-card ${checked ? 'is-selected' : ''} ${b.installed ? '' : 'is-absent'}" data-nb-card="${esc(b.id)}">
+          <div class="nb-card-top">
+            <label class="nb-check-label">
+              <input type="checkbox" class="nb-browser-cb" value="${esc(b.id)}" ${checked ? 'checked' : ''} ${b.installed ? '' : 'disabled'} />
+              <strong>${esc(b.name)}</strong>
+            </label>
+            <span class="status-tag ${stClass}">${esc(stText)}</span>
+          </div>
+          <div class="nb-card-note">${esc(b.note || '')}</div>
+          ${profs}
+          <div class="nb-card-foot">${guideBtn}</div>
+        </div>`;
+    }).join('');
+  }
+
+  async function loadNativeBrowsers() {
+    try { renderNativeBrowsers(await api('/api/native-browsers')); } catch (e) { toast('读取原生浏览器状态失败: ' + e.message); }
   }
 
   async function refreshAll() {
@@ -1708,6 +1773,13 @@
     } catch (e) { toast(e.message, 'err'); }
   });
   $('btn-check-browser-fp').addEventListener('click', () => { checkBrowserFingerprint(); toast('浏览器指纹已刷新', 'ok'); });
+  $('btn-go-native-shield')?.addEventListener('click', () => {
+    switchTab('network');
+    switchNetSub('proxy');
+    setTimeout(() => {
+      $('native-browsers-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+  });
   $('btn-launch-browser-fc')?.addEventListener('click', () => withBtnBusy($('btn-launch-browser-fc'), '启动中…', async () => {
     const r = await api('/api/launch/browser', { method: 'POST', body: JSON.stringify({ url: 'https://fuck-claude.app/' }) });
     const bName = (r.browser || '').split('/').pop() || 'Browser';
@@ -1810,6 +1882,63 @@
       }
     } else {
       toast(pac.matches_peaceclaude ? '关闭 PAC 后仍生效，请检查系统网络' : '已关闭系统浏览器 PAC', pac.matches_peaceclaude ? 'warn' : 'ok');
+    }
+  }));
+
+  // Native Browser Multi-Select Protection Events
+  $('nb-browser-grid')?.addEventListener('change', (ev) => {
+    const cb = ev.target.closest('.nb-browser-cb');
+    if (!cb) return;
+    cb.closest('.nb-card')?.classList.toggle('is-selected', cb.checked);
+  });
+  $('nb-browser-grid')?.addEventListener('click', async (ev) => {
+    const btn = ev.target.closest('button[data-nb-guide]');
+    if (!btn) return;
+    const browserID = btn.dataset.nbGuide;
+    await withBtnBusy(btn, '打开中…', async () => {
+      const res = await api('/api/native-browsers/guide', {
+        method: 'POST',
+        body: JSON.stringify({ browser_id: browserID }),
+      });
+      lastGuideExtURL = res.extensions_url || '';
+      if (lastGuideExtURL) {
+        try { await navigator.clipboard.writeText(lastGuideExtURL); } catch {}
+      }
+      const box = $('nb-guide-box');
+      if (box) {
+        $('nb-guide-title').textContent = `${res.browser_name || browserID} 定向护航扩展加载指引`;
+        $('nb-guide-steps').innerHTML = (res.steps || []).map((s) => `<li>${esc(s)}</li>`).join('');
+        box.classList.remove('hidden');
+      }
+      toast(res.message + (lastGuideExtURL ? `（已复制 ${lastGuideExtURL}）` : ''), 'ok');
+    });
+  });
+  $('btn-nb-refresh')?.addEventListener('click', () => withBtnBusy($('btn-nb-refresh'), '检测中…', async () => {
+    await loadNativeBrowsers();
+    toast('原生浏览器护航状态已刷新', 'ok');
+  }));
+  $('btn-nb-copy-path')?.addEventListener('click', async () => {
+    const p = nativeBrowsersData?.extension_dir || '~/.peaceclaude/extensions/native-browser-shield';
+    try { await navigator.clipboard.writeText(p); toast('已复制扩展目录: ' + p, 'ok'); } catch { toast(p); }
+  });
+  $('btn-nb-copy-exturl')?.addEventListener('click', async () => {
+    if (!lastGuideExtURL) return;
+    try { await navigator.clipboard.writeText(lastGuideExtURL); toast('已复制扩展管理页地址: ' + lastGuideExtURL, 'ok'); } catch { toast(lastGuideExtURL); }
+  });
+  $('btn-nb-close-guide')?.addEventListener('click', () => $('nb-guide-box')?.classList.add('hidden'));
+  $('btn-nb-apply')?.addEventListener('click', () => withBtnBusy($('btn-nb-apply'), '开启中…', async () => {
+    const selected = Array.from(document.querySelectorAll('.nb-browser-cb:checked')).map((el) => el.value);
+    const res = await api('/api/native-browsers/protect', {
+      method: 'POST',
+      body: JSON.stringify({ browsers: selected, enable_pac: true }),
+    });
+    if (res.report) renderNativeBrowsers(res.report);
+    await refreshAll();
+    const pendingExt = (res.report?.browsers || []).filter((b) => selected.includes(b.id) && b.supports_extension && !b.extension_enabled);
+    if (pendingExt.length > 0) {
+      toast(`已开启系统 PAC（${selected.length} 项）！请为 ${pendingExt.map((b) => b.name).join(' / ')} 点击「打开目录并引导载入」完成一次扩展加载`, 'ok');
+    } else {
+      toast('所选原生浏览器已处于全链路护航状态！', 'ok');
     }
   }));
 

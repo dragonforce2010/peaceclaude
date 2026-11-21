@@ -245,6 +245,9 @@ func RunDoctor(ctx context.Context, cfg *config.Config, daemonRunning bool, gate
 
 	var checks []CheckItem
 	add := func(id, title, status, detail, fix string, weight int, critical bool) {
+		if status == "pass" {
+			fix = ""
+		}
 		item := CheckItem{
 			ID: id, Title: title, Status: status, Detail: detail, FixHint: fix, Weight: weight, Critical: critical,
 		}

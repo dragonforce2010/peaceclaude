@@ -1,185 +1,170 @@
-# PeaceClaude
+<p align="center">
+  <img src="internal/ui/assets/peace-logo.png" alt="PeaceClaude Logo" width="88" />
+</p>
 
-**省心、放心的 macOS 零虚拟机静态 IP Claude 全入口安全套件（Desktop / CLI / 浏览器）**
+<h1 align="center">PeaceClaude</h1>
 
-`peaceclaude` 融合了 **[Claude-Cage](https://github.com/Lee-xeo/Claude-Cage)** 的 Fail-Closed 安全隔离理念与 **[ReClaude](https://www.recode.cat/)** 的轻量单二进制本地代理体验，专为在 macOS 上拥有 **Webshare 等静态 IP 链路**、想省心放心地使用官方 Claude（且不想承受虚拟机内存/磁盘与画面延迟开销）的用户打造。
+<p align="center">
+  <strong>Zero-VM, Fail-Closed Static-IP Cockpit for Claude on macOS.</strong><br/>
+  Run Claude Desktop, Claude Code CLI, and your everyday Arc / Chrome / Brave browsers at native speed — locked to your static US egress IP, synced timezone/locale, and verified <code>2 / 100 LOW RISK</code> anti-fingerprint posture.
+</p>
+
+<p align="center">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="docs/CLI_GUIDE.md">CLI Guide</a> · <a href="website/index.html">Official Landing Page</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-v0.2.0-D97757?style=flat-square" alt="Version v0.2.0" />
+  <img src="https://img.shields.io/badge/macOS-Universal%20(arm64%20%2B%20x86__64)-18181B?style=flat-square&logo=apple" alt="macOS Universal" />
+  <img src="https://img.shields.io/badge/footprint-~18MB%20RAM%20%7C%200%20VM-10B981?style=flat-square" alt="Zero VM ~18MB RAM" />
+  <img src="https://img.shields.io/badge/Go-100%25%20Stdlib%20Zero--Deps-00ADD8?style=flat-square&logo=go" alt="Zero Dependencies Go" />
+  <img src="https://img.shields.io/badge/egress-Fail--Closed%20%2B%20pf-0D9488?style=flat-square" alt="Fail-Closed + pf" />
+</p>
 
 ---
 
-## 核心能力一览
+<p align="center">
+  <img src="docs/screenshots/accounts-overview.png" alt="PeaceClaude Multi-Account Workbench Overview" width="100%" />
+</p>
 
-| 模块 | 解决什么问题 | 实现机制 |
+## Why PeaceClaude?
+
+Developers on macOS using a static US IP face an ugly trade-off: bare proxy setups leak real local sockets, host `Asia/Shanghai` timezones, and Chinese browser fingerprints — while running an 8 GB Linux desktop VM destroys battery life, breaks native macOS workflows, and adds display lag.
+
+**PeaceClaude takes a third path:** a single zero-dependency Go binary (`~18 MB` RAM, `<0.2s` startup) paired with a native Swift/WKWebView app, kernel `pf` fail-safe anchors, and a surgical domain-scoped Chromium MV3 shield.
+
+| Dimension | Naked System Proxy / TUN | Heavy Linux VM | **PeaceClaude (Zero-VM)** |
+|---|---|---|---|
+| **Memory & Disk Overhead** | `~50–200 MB`, easy to break | `4–8 GB RAM`, `15–30 GB` disk | **`~18 MB RAM`, `16 MB` bundle** |
+| **Cold Start Time** | `< 1s` | `25–45s` VM boot | **`< 0.2s` instant launch** |
+| **Native App Experience** | Native (but frequently leaks) | Remote framebuffer lag | **100% Native Claude Desktop, CLI & Arc/Chrome** |
+| **Egress Fail-Closed** | Drops back to direct on proxy blip | Depends on guest firewall | **Instant `503` + active socket kill + `pfctl` anchor** |
+| **Timezone / Locale / Font Alignment** | Exposes `Asia/Shanghai` & `zh-CN` | Requires full guest OS config | **Auto-synced to egress city (`TZ`, `LANG`, `Intl`, Canvas)** |
+| **Native Browsers (Arc / Chrome)** | All sites or Split-IP leakage | Separate VM browser only | **PAC + Domain-Scoped MV3 Shield (`2/100 LOW RISK`)** |
+| **Multi-Account Switching** | Manual token juggling | Multiple VMs or manual cleanup | **Physical profile isolation + Single-Active `claude://` routing** |
+| **Enterprise VPN Coexistence** | TUN often breaks corporate VPN | Bridge conflicts | **Zero TUN · Coexists cleanly with corporate VPNs** |
+
+---
+
+## Architecture Overview
+
+Every Anthropic/Claude surface routes through PeaceClaude's local Fail-Closed Egress Gate, while everyday work, Slack/Lark, and domestic traffic stay completely untouched.
+
+```mermaid
+flowchart LR
+    U1["Claude Code CLI (pclaude cli)"] --> P1["Local Isolation Env (TZ + en-US + Proxy)"]
+    U2["Claude Desktop (PeaceClaude.app)"] --> P2["Isolated user-data-dir + QUIC Off"]
+    U3["Native Browsers (Arc / Chrome)"] --> P3["System PAC + Domain MV3 Shield"]
+    U4["Isolated Login Chrome"] --> P4["Prefs Override + Loopback CDP Shield"]
+
+    P1 --> GW["PeaceClaude Local Gateway (HTTP :18897 / SOCKS5 :18898)"]
+    P2 --> GW
+    P3 --> GW
+    P4 --> GW
+
+    GW --> FG{"Fail-Closed Egress Gate"}
+    FG -- "IP Verified (OPEN)" --> UP["Static US IP Upstream (Webshare SOCKS5/HTTP or Local Proxy)"]
+    FG -- "IP Drift or Lock" --> BLK["Hard HTTP 503 + Kill Active Streams"]
+    HOST["Direct Anthropic Fallback"] -.-> PF["macOS pf Kernel Killswitch"]
+    PF -.-> DROP["Drop Unproxied IPv4/IPv6/UDP"]
+```
+
+---
+
+## Key Capabilities & Workbench Tour
+
+### 1. 11-Point Security Doctor & Zero-Redundancy Triage
+Verifies IPv4/IPv6 kernel `pf` blocks, remote DNS resolution (`SOCKS5 ATYP=DOMAIN`), CLI/Desktop timezone & language injection, physical profile isolation, Fail-Closed policy enforcement, QUIC/WebRTC UDP suppression, and static IP consistency in real time — with one-click remediation and instant score recalculation (`0–100`).
+
+<p align="center">
+  <img src="docs/screenshots/security-doctor.png" alt="PeaceClaude 11-Point Security Doctor" width="92%" />
+</p>
+
+### 2. Multi-Select Native Browser Shield (Arc / Chrome / Brave / Edge)
+Enabling PAC alone routes IP traffic — but native browsers still broadcast `Asia/Shanghai`, `zh-CN`, and Chinese font lists. PeaceClaude combines **strict Claude-only PAC routing** with a **Domain-Scoped MV3 Shield Extension** (`~/.peaceclaude/extensions/native-browser-shield/`):
+- Only injects US timezone (`Date` prototype + `Intl` 8 constructors), `en-US` headers (`declarativeNetRequest`), GPC/DNT, Canvas CJK font scrubbing, and WebRTC UDP policy on `claude.ai`, `claude.com`, `anthropic.com`, `claudeusercontent.com`, and `fuck-claude.app`.
+- **Zero interference** on everyday work tabs, corporate intranets, or other sites (native timezone/language preserved 100%).
+- Tested on native `Asia/Shanghai` + `zh_CN` Chrome process with PAC + Shield Extension: achieves **`2 / 100 (LOW RISK)`** on `fuck-claude.app`.
+
+<p align="center">
+  <img src="docs/screenshots/native-browser-shield.png" alt="Multi-Select Native Browser Protection" width="92%" />
+</p>
+
+### 3. Original Workbench, Themes & LAN/Tailscale Remote Control
+Built as a pure-Go embedded console (`http://127.0.0.1:18899`) and native Swift/WKWebView app (`/Applications/PeaceClaude.app`):
+- **Appearance Studio**: 6 light + 6 dark curated palettes, custom primary accent / foreground / surface overrides, font scaling, and `⌘L` instant privacy lock.
+- **Mobile Pairing Pass**: Generates ephemeral 120s ISO-18004 SVG QR tickets (`SHA-256` hashed Bearer tokens, strict zero-cloud-relay) for switching profiles or locking egress from your phone over LAN or Tailscale.
+- **Built-in CLI Guide**: Categorized command launcher with one-click copy inside the app.
+
+| Appearance Studio | Mobile Pairing Pass | Built-in CLI Guide |
 |---|---|---|
-| **Fail-Closed 出口门禁** | 代理断开/规则被清空/IP 漂移时直连 Anthropic 触发风控 | 本地 Go 守护网关（HTTP `:18897` / SOCKS5 `:18898`），4 源并行竞速探活 + IP 漂移 0 容忍秒锁，瞬态抖动快速复检不误杀；启用 `TCP_NODELAY`、瞬断重试、备用上游切换与半关闭连接回收，**绝不回退直连** |
-| **双模式静态 IP 上游** | 既想开箱复用本机 Clash Verge，又想彻底消除 Split-IP 双出口 | 支持 `local-proxy`（无缝接管 `127.0.0.1:7897` 并自动检测 Split-IP 预警）与 `direct-socks5` / `direct-http`（直连 Webshare SOCKS5，远端解析 DNS，解决 `platform.claude.com` OAuth HTTP CONNECT RST 问题） |
-| **时区与语言指纹同步** | macOS 本机 `Asia/Shanghai` + `zh-CN` 撞上美国静态 IP | 根据出口 IP 精准查询 IANA 时区（如自动对齐 `America/Denver` / `America/New_York`），启动 CLI / Desktop / 登录浏览器时自动注入 `TZ`、`LANG=en_US.UTF-8`、`--lang=en-US` |
-| **统一托管 CLI & Desktop + Auto-Peace 防误点** | 容易误点原生图标或被宿主机 `ANTHROPIC_BASE_URL` 中转污染 | `peaceclaude cli` 自动定位最新版原生二进制并剥离宿主机污染变量；`/Applications/PeaceClaude.app` 强制独立 `--user-data-dir`、`--proxy-server`、`--disable-quic`（兼容官方 Claude.app v6+ 启动校验）并内置启动探活与窗口置顶；后台实时守护，误点原生 `Claude.app` 自动接管重开 |
-| **多浏览器全入口覆盖 (PAC + 隔离浏览器)** | 普通浏览器或 Desktop 唤起 Google OAuth 时直连 `claude.ai` 触发 403 | `pac.go` 与 `policy.go` 共享完整 OAuth/Captcha 资源域（覆盖 `accounts.google.com`/`gstatic.com`/`googleapis.com`/`googleusercontent.com`），`www.google.com` 与飞连内网保持 `DIRECT`；多账号页在未开 PAC 时自动提示一键开启 |
-| **多账号管理、套餐与实时用量中心** | 多账号容易串号或网页登录回调「打开 Claude」发偏无响应 | 采用 **Hero 默认焦点仪表卡 + 待命账号列对齐清单** 原创布局：清晰区分「已激活」vs「未登录」及 `Desktop PID`，内置 **单活切换模式** 平滑关闭干扰实例并透传 `claude://` 深链 |
-| **Unslop 原创外观工坊与一体式指令托盘** | 默认设置界面单一，缺实时画布与快捷锁屏控制 | 按 `unslop` 精密仪器美学原创设计：统一单层侧栏、单行遥测顶轨、7:5 实时微缩画布外观工坊（5 套浅色 / 5 套深色原创色板 + 三原色微调 + JSON 导入导出）、左下角集成快捷面板支持内联主题速切与 `⌘L` 一键锁屏 |
-| **手机扫码远程配对台与移动控制台** | 需要手机端快速查看余额、切换默认号或唤醒 Desktop | 7:5 连接拓扑与 120s 实时倒计时「配对通行证」，内置纯 Go ISO-18004 SVG 二维码（`/mobile` 支持浅/深自适应），支持局域网 / Tailscale 限权 Bearer 直连与随时撤销授权设备 |
-| **遥测屏蔽盾** | 客户端埋点泄露宿主机异常与设备指纹 | 网关层阻断 `sentry.io`、`statsigapi.net`、`segment.io` 等遥测域名 + CLI 注入 `DISABLE_TELEMETRY=1` |
-| **直通泄漏审计 & 30 天滚动存储** | 日志长期累计占磁盘，403 不知道怎么查 | `leaks` 与脱敏 `capture`（自动脱敏 Authorization/Cookie/OAuth Code）均默认保留最近 **30 天**并每 6 小时自动滚动清理（辅以 10MB 单文本日志上限）；所有配置存于 `~/.peaceclaude/` (`0700`/`0600`) 本地 JSON 目录 |
-| **403 三分诊 & 可恢复指纹清理** | 看到 403 误点 Sign Out 伤 Token；换号清理怕误删 skills | `diagnose` 自动区分 `network` / `auth` / `unknown`；`clean` 盘点+自动备份+保留 `CLAUDE.md/skills/settings.json` |
-| **macOS pf 护盾 & Cowork `vm-proxy`** | 兜底任何绕过环境变量直连或 Cowork VM 泄漏 | 自动生成经 `pfctl -n` 校验的 `pf` Kill-Switch 与 Cowork 子网规则（绝不开 TUN，绝不冲突企业飞连） |
-| **零依赖内嵌 Web 控制台** | 命令行之外一眼看清安全状态 | `http://127.0.0.1:18899` 提供安全评分环、浏览器本地指纹自检、档案管理、抓包与一键启动 |
+| ![Appearance Studio](docs/screenshots/appearance-studio.png) | ![Remote Pairing](docs/screenshots/remote-pair.png) | ![CLI Guide](docs/screenshots/cli-guide.png) |
 
 ---
 
-## 快速安装
+## 30-Second Quick Start
 
-### 方式 A：下载 Release 安装包（免 Go 环境，支持 Apple Silicon & Intel）
+### Option A: Universal macOS Release Package (No Go Required · Apple Silicon & Intel)
 
-前往 GitHub Releases 下载对应版本的离线通用包：
-- **图形化镜像包**：`PeaceClaude-v<VERSION>-macos-universal.dmg`
-  1. 双击打开 DMG，将 `PeaceClaude.app` 拖入 `Applications`；
-  2. 双击镜像内的 `Install-PeaceClaude-CLI.command` 一键安装 `peaceclaude` / `pclaude` 命令并启动后台安全网关（已有 `~/.peaceclaude` 账号数据会完整保留）。
-- **命令行离线包**：`peaceclaude-v<VERSION>-macos-universal.tar.gz`
+Download from **GitHub Releases**:
+
+- **DMG Installer (`PeaceClaude-v0.2.0-macos-universal.dmg`)**:
+  1. Drag **`PeaceClaude.app`** into **`Applications`** (self-contained: embeds universal CLI inside `Contents/Resources/bin/peaceclaude`).
+  2. Double-click **`Install-PeaceClaude-CLI.command`** in the DMG to install `peaceclaude` / `pclaude` CLI and start the LaunchAgent gateway.
+- **Offline Archive (`peaceclaude-v0.2.0-macos-universal.tar.gz`)**:
   ```bash
-  tar -xzf peaceclaude-v<VERSION>-macos-universal.tar.gz
-  cd peaceclaude-v<VERSION>-macos-universal
+  tar -xzf peaceclaude-v0.2.0-macos-universal.tar.gz
+  cd peaceclaude-v0.2.0-macos-universal
   ./install.sh
   ```
-> 如 macOS 首次提示无法验证开发者，执行 `xattr -dr com.apple.quarantine /Applications/PeaceClaude.app` 后再打开即可；安装或升级均可核对同目录 `SHA256SUMS.txt`（`shasum -a 256 -c SHA256SUMS.txt`）。
 
-### 方式 B：从源码编译安装（需 Go 1.24+）
+> If macOS displays an unverified developer prompt on first launch (ad-hoc signed open-source build), run once:
+> `xattr -dr com.apple.quarantine /Applications/PeaceClaude.app ~/.local/bin/peaceclaude`
+
+### Option B: Build from Source (Requires Go 1.24+)
 
 ```bash
 chmod +x ./install.sh
 ./install.sh
 ```
 
-安装完成后会就绪：
-- 全局命令：`~/.local/bin/peaceclaude` 与短别名 `~/.local/bin/pclaude`（不依赖 nvm，新终端直接可用）
-- 桌面入口：`/Applications/PeaceClaude.app`（带专属锁盾图标，可直接从 Spotlight / Launchpad / Dock 启动）
-- 后台服务：macOS LaunchAgent `com.peaceclaude.daemon`（开机/登录自启，仅监听 `127.0.0.1`）
-- 配置与数据：`~/.peaceclaude/`（严格 `0700`/`0600` 权限，绝不覆写原生 `~/.claude` 与 `Claude.app` 数据）
+Installed layout (all existing user accounts & `~/.claude` remain strictly untouched):
+- **CLI**: `~/.local/bin/peaceclaude` & short alias `pclaude`
+- **Desktop App**: `/Applications/PeaceClaude.app` (native Swift/WKWebView + bundled CLI)
+- **LaunchAgent**: `com.peaceclaude.daemon` (`127.0.0.1` loopback only)
+- **State Directory**: `~/.peaceclaude/` (`0700`/`0600` strict permissions, 30-day rolling log/capture retention with automatic secret redaction)
 
 ---
 
-## 日常正确使用指南
+## Essential Commands
 
-### 1. 日常使用 Claude Code CLI
 ```bash
-peaceclaude cli
-# 或使用短别名
-pclaude cli
-# 透传任意原生参数（如 --continue、-p）
-pclaude cli --continue
-```
-> **不要**直接用未隔离的原生 `claude` 访问官方个人订阅账号；通过 `pclaude cli` 启动会自动完成 Egress Gate 预检、注入静态 IP 代理、同步美区时区/语言、并剥离宿主机中转 `ANTHROPIC_BASE_URL`。
+# Daily isolated launchers
+peaceclaude cli                           # Launch isolated Claude Code CLI (pclaude cli)
+peaceclaude cli --profile atlas-work      # Launch a specific isolated profile
+peaceclaude app                           # Launch isolated Claude Desktop
+peaceclaude login-browser                 # Open isolated Chrome with 2/100 LOW RISK shield
 
-### 2. 日常使用 Claude Desktop 客户端
-- **推荐方式**：直接从 Spotlight / `/Applications` 打开 **`PeaceClaude.app`**（可拖到 Dock），或在终端运行：
-  ```bash
-  peaceclaude app
-  ```
-- 如果误点了原生 `Claude.app`：
-  - 默认开启 **Auto-Peace 自动接管**（`auto_peace_desktop=true`）：后台在 2 秒内自动关闭新开的未隔离原生窗口，校验静态 IP 门禁后自动以安全隔离模式重新拉起 Claude Desktop；
-  - 若想改为“只弹原生警告框，点击按钮再切换”：`peaceclaude config set auto_peace_desktop false && peaceclaude service restart`；
-  - 对之前已经开着的旧原生窗口，可运行 `peaceclaude app takeover` 或在 Web 控制台点 **「一键接管并隔离重开」**。
-- 如果出口异常或被手动熔断，启动器会直接弹出 macOS 红色告警框阻止启动，绝不会放行直连。
+# Native browser & network defense
+peaceclaude browser-pac on                # Route Claude traffic from Arc/Chrome/Safari via static IP
+peaceclaude browser-shield status         # Inspect MV3 shield loading across Arc/Chrome/Brave/Edge
+peaceclaude browser-shield open --browser arc  # Reveal extension folder & open guide for Arc
 
-### 3. 浏览器访问（隔离浏览器 & 普通浏览器 PAC）
-- **最推荐（完整隔离：IP + 指纹 + 时区 + Cookie）**：使用内置隔离浏览器：
-  ```bash
-  peaceclaude login-browser
-  # 或传入 CLI 打印出来的 OAuth URL：
-  peaceclaude login-browser "https://platform.claude.com/oauth/authorize?..."
-  ```
-  该浏览器使用独立的 `browser-profile`，强制走 `peaceclaude` 静态 IP 网关与美区时区/语言；通过强写 `Preferences`/`Local State` 覆盖语言与 `DNT`/`Geolocation` 禁权，并在 Chromium 浏览器按需加载本地回环 `Identity Shield` MV3 扩展统一 `navigator.languages`、`Intl` 默认区域、GPC 与 Canvas 中文字体指纹枚举，且禁用 QUIC 与 WebRTC 非代理 UDP。
-- **普通浏览器（Chrome / Safari / Arc / Edge）网络层自动保护**：
-  ```bash
-  peaceclaude browser-pac on     # 开启系统 PAC（仅 Claude 域名走 PeaceClaude，不影响飞连与日常网页）
-  peaceclaude browser-pac status # 检查 PAC 状态
-  peaceclaude browser-pac off    # 随时一键还原
-  ```
-  > 注：PAC 让所有普通浏览器访问 `claude.ai` 自动享受静态 IP + Fail-Closed 熔断，但无法改写普通浏览器自带的宿主机时区/语言/历史 Cookie；深度使用网页版或首次登录仍推荐 `peaceclaude login-browser`。
-
-### 4. 升级为“零 Split-IP”直连 Webshare SOCKS5 模式（强烈推荐）
-默认初始化会无缝复用本机 Clash Verge (`127.0.0.1:7897`)。如果你有可直达的 Webshare SOCKS5 静态 IP，强烈建议切换到直连模式，让所有页面附属请求（Stripe / hCaptcha / Cloudflare / 第三方脚本）100% 与 Claude 走同一个静态 IP，彻底消除 Split-IP 风险：
-```bash
-# 方式 A：直接配置 Webshare SOCKS5
-peaceclaude config set-upstream \
-  --mode direct-socks5 \
-  --addr <WEBSHARE_IP>:<PORT> \
-  --user <USERNAME> \
-  --pass <PASSWORD> \
-  --expected-ip <WEBSHARE_IP>
-peaceclaude service restart
-peaceclaude config gateway   # 测速并验证出口与 OAuth TLS
-
-# 方式 B：如果节点已在 Clash 配置中，可先安全预览再决定是否导入（绝不打印密码）
-peaceclaude config import-clash --node Claude-US-1
-# 注意：若你的节点依赖 Clash 前置跳板 (dialer-proxy，如 Xray-LA-1)，请继续保持 local-proxy 模式，
-# 并可按需开启严格域名隔离以阻断非 Claude 域名的 Split-IP：
-peaceclaude config set strict_split true
-peaceclaude service restart
+# Upstream & diagnostics
+peaceclaude config set-upstream --mode direct-socks5 --addr <IP>:<PORT> --user <U> --pass <P> --expected-ip <IP>
+peaceclaude status                        # Live egress gate, IP, city/timezone, and defense overview
+peaceclaude doctor --fix                  # Run 11-point security audit & auto-remediate issues
+peaceclaude diagnose                      # Triage 403/drops cleanly (network vs auth vs unknown)
+peaceclaude lock "maintenance"            # Emergency Fail-Closed cut-off
 ```
 
-### 5. 多账号隔离与全局规则共享
-```bash
-# 创建第二个隔离档案
-peaceclaude profile create backup-us --note "备用 Webshare 账号"
-# 切换默认档案
-peaceclaude profile use backup-us
-# 开启全局规则共享（CLAUDE.md / skills / agents / hooks 跨档案同步）
-peaceclaude rules on
-peaceclaude rules status
-```
-
-### 6. 遇到 403 / 断流 / 换号时的标准操作
-```bash
-# ① 看到 403 千万别立刻点 Sign Out！先运行三分诊：
-peaceclaude diagnose
-
-# ② 运行全链路防风控安全体检（0-100 评分）：
-peaceclaude doctor
-
-# ③ 查看近 24 小时直通与分流泄漏审计：
-peaceclaude leaks --since 24h
-
-# ④ 需要深度排查请求时，按需开启脱敏抓包（查完记得关闭）：
-peaceclaude capture on
-peaceclaude capture list
-peaceclaude capture off
-
-# ⑤ 换号或清理旧指纹（先 dry-run 盘点，确认后加 --yes，自动备份且保护 skills/CLAUDE.md）：
-peaceclaude clean --profile default --dry-run
-peaceclaude clean --profile default --yes
-
-# ⑥ 打开可视化 Web 控制台：
-peaceclaude ui
-```
-
-### 7. 可选：激活 macOS 内核级 `pf` 防直连 Kill-Switch（含 Cowork VM 防护）
-如果你希望连宿主机上任何企图绕过代理直连 Anthropic CIDR 的进程都被内核直接丢弃（如果本机已有 `/etc/pf.anchors/claude.egress` 护盾，`peaceclaude doctor` 会自动识别并显示绿灯）：
-```bash
-peaceclaude vm-proxy status
-# 如需启用 Cowork VM 子网白名单并安装 PeaceClaude pf anchor：
-peaceclaude vm-proxy on
-peaceclaude vm-proxy install   # 按提示执行 sudo 命令，不清空企业飞连规则
-```
+Full command reference & safety walkthrough: [docs/CLI_GUIDE.md](docs/CLI_GUIDE.md).
 
 ---
 
-## CLI 与控制台详细使用指南（Private 仓库脱敏文档）
+## Honest Security Boundaries (Zero-VM Design)
 
-> 完整 22 组 CLI 子命令参数详解、CLI 唤起系统浏览器（Arc 等）PAC 安全前置条件、`Privacy -> Location metadata` 防泄露实证说明与全套工作台界面详解，请参阅：[docs/CLI_GUIDE.md](docs/CLI_GUIDE.md)。
-
-- **内嵌 CLI 使用指南**：Web 控制台左侧 **「系统与连接 → CLI 使用指南」** 直接列出全部常用 CLI 指令，支持点击一键复制；
-- **多账号中心与安全检测脱敏预览**（来自 RFC 5737 脱敏沙盒演示数据）：
-
-![多账号中心界面](docs/screenshots/accounts-overview.png)
-
-![安全检测与分诊界面](docs/screenshots/security-doctor.png)
-
----
-
-## 开发与测试
-
-```bash
-make build          # 编译二进制到 ./bin/peaceclaude
-make test-race      # 运行全量 Go 竞态与单元测试
-make regression     # 运行端到端沙箱回归测试门禁
-```
+PeaceClaude optimizes for **zero-friction native speed and deterministic network/fingerprint isolation**, without claiming VM kernel virtualization:
+1. **What it guarantees**: Fail-Closed static-IP gating (`no direct fallback`), active socket severance on IP drift/lock, kernel `pf` IPv4/IPv6/UDP anchor blocking, physical `~/.peaceclaude/profiles/<id>/` config/Desktop/browser separation, host env stripping (`ANTHROPIC_BASE_URL`), telemetry blocking, and aligned timezone/locale/CJK font surfaces.
+2. **Where a VM still differs**: All processes run under the same macOS UID — malicious code executed inside a Claude Code session still has access to normal user-space files unless further constrained by directory permissions or a separate macOS user/VM.
+3. **Host browser extension safety**: Chromium browsers on macOS block silent force-installation of unsigned extensions; PeaceClaude generates the domain-scoped MV3 bundle locally, guides a 10-second developer-mode load per chosen browser, and verifies active status directly from browser `Preferences`.

@@ -62,6 +62,7 @@ peaceclaude ui
 | `peaceclaude app` | `pclaude app` | 子命令 `run \| takeover \| reset \| install`、`--profile <ID>`、`--dry-run` | 启动独立 `--user-data-dir` 与 `--disable-quic` 的 Claude Desktop；`takeover` 接管误开的原生实例 |
 | `peaceclaude login-browser` | `browser` | `--profile <ID>`、`--dry-run`、`[url]` | 拉起带独立 `browser-profile`、强制代理、禁用 WebRTC UDP/Geolocation 与时区对齐的隔离登录浏览器 |
 | `peaceclaude browser-pac` | `pac` | `status \| on \| enable \| off \| disable`、`--dry-run` | 管理 macOS 系统默认浏览器 PAC 分流（仅代理 Claude 域，Google/日常网页直连） |
+| `peaceclaude browser-shield` | `shield` | `status \| sync \| open [--browser arc]`、`--json` | 生成/热同步域名定向 MV3 护航扩展并检测 Arc / Chrome / Brave / Edge 加载状态（仅护 Claude 与检测站，不干扰日常网页） |
 | `peaceclaude ui` | `dashboard` | 无 | 在默认浏览器打开或聚焦本地 Web 工作台（默认 `http://127.0.0.1:18899`） |
 
 ### 2. 多账号档案（Profile）与规则同步
@@ -120,12 +121,18 @@ peaceclaude ui
 
 ![安全检测与分诊脱敏截图](screenshots/security-doctor.png)
 
-### 3. CLI 使用指南（工作台内置分页）
+### 3. 原生浏览器多选护航（网络与策略 → PAC + 定向 MV3 扩展）
+- 自动扫描本机安装的 Arc / Google Chrome / Brave / Edge / Safari，支持多选勾选并一键开启系统 PAC + 生成热同步的域名定向 MV3 护航扩展；
+- 点击 **「打开目录并引导载入」** 即可在 Finder 中高亮选中 `~/.peaceclaude/extensions/native-browser-shield/` 并复制对应扩展管理页地址，完成后在原生 `Asia/Shanghai` 浏览器上同样可达成 `fuck-claude.app` `2/100 LOW RISK`。
+
+![原生浏览器多选护航截图](screenshots/native-browser-shield.png)
+
+### 4. CLI 使用指南（工作台内置分页）
 - 集中呈现 4 大分类常用命令，点击任意命令右侧 **「复制」** 或右上角 **「复制当前账号 CLI 命令」** 即刻写入剪贴板；顶部同步标注 CLI 唤起系统浏览器的 PAC 安全前置条件。
 
 ![CLI使用指南脱敏截图](screenshots/cli-guide.png)
 
-### 4. 外观工坊与远程配对台
+### 5. 外观工坊与远程配对台
 - **7:5 外观工坊**：支持浅色/深色/跟随系统、5+5 原创配色板、实时微缩交互预览与配色导出。
 - **7:5 远程配对台**：签发 120 秒有效一次性配对二维码，支持手机端扫码接入限权 `/mobile` 页面快速切换当前使用档案、查看额度与控制网关。
 

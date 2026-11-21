@@ -52,6 +52,9 @@ func (s *Server) controlHandler() http.Handler {
 	mux.HandleFunc("/api/launch/desktop", s.withCSRF(s.handleLaunchDesktop))
 	mux.HandleFunc("/api/launch/browser", s.withCSRF(s.handleLaunchBrowser))
 	mux.HandleFunc("/api/browser-pac", s.withCSRF(s.handleBrowserPAC))
+	mux.HandleFunc("/api/native-browsers", s.handleNativeBrowsers)
+	mux.HandleFunc("/api/native-browsers/protect", s.withCSRF(s.handleNativeBrowsersProtect))
+	mux.HandleFunc("/api/native-browsers/guide", s.withCSRF(s.handleNativeBrowserGuide))
 	mux.HandleFunc("/api/config/update", s.withCSRF(s.handleConfigUpdate))
 	mux.HandleFunc("/api/workbench/lock", s.withCSRF(s.handleWorkbenchLock))
 	mux.HandleFunc("/api/appearance", s.handleAppearanceGet)
@@ -1132,6 +1135,90 @@ func (s *Server) handleBrowserPAC(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+func (s *Server) handleNativeBrowsers(w http.ResponseWriter, _ *http.Request) {
+	cfg := s.configSnapshot()
+	snap := s.gate.Snapshot()
+	_, _ = launcher.EnsureNativeBrowserShield(&cfg, snap)
+	rep := launcher.InspectNativeBrowsers(&cfg, host.InspectBrowserPAC(&cfg), snap)
+	writeJSON(w, http.StatusOK, rep)
+}
+
+func (s *Server) handleNativeBrowsersProtect(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Browsers  []string `json:"browsers"`
+		EnablePAC *bool    `json:"enable_pac"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	normalized := launcher.NormalizeProtectedBrowsers(body.Browsers)
+	wantPAC := true
+	if body.EnablePAC != nil {
+		wantPAC = *body.EnablePAC
+	}
+
+	s.mu.Lock()
+	next := *s.cfg
+	next.Shield.ProtectedBrowsers = normalized
+	if wantPAC {
+		autoTrue := true
+		next.Listen.AutoEnableBrowserPAC = &autoTrue
+		next.Listen.BrowserPACPaused = false
+	}
+	if err := config.Save(&next); err != nil {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	s.swapConfigLocked(next)
+	s.mu.Unlock()
+
+	if wantPAC {
+		if _, _, err := host.SetSystemBrowserPAC(&next, true, false); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	snap := s.gate.Snapshot()
+	if _, err := launcher.EnsureNativeBrowserShield(&next, snap); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	rep := launcher.InspectNativeBrowsers(&next, host.InspectBrowserPAC(&next), snap)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"report": rep,
+	})
+}
+
+func (s *Server) handleNativeBrowserGuide(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		BrowserID string `json:"browser_id"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.BrowserID) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing browser_id"})
+		return
+	}
+	cfg := s.configSnapshot()
+	snap := s.gate.Snapshot()
+	extDir, err := launcher.EnsureNativeBrowserShield(&cfg, snap)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	res, err := launcher.OpenNativeBrowserExtensionGuide(body.BrowserID, extDir)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
 func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		UpstreamMode          string   `json:"upstream_mode"`
@@ -1226,6 +1313,7 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	res := s.gate.Check(ctx, false)
 	cancel()
+	go s.syncNativeBrowserShield()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok":     true,
 		"config": next.Redacted(),

@@ -100,10 +100,19 @@ func New(cfg *config.Config, selfBin string) *Server {
 			log.Printf("[egress-gate] OPEN: egress=%s (%s · %s · TZ=%s)",
 				res.EgressIP, res.Country, res.City, gate.Snapshot().EffectiveTimezone)
 			go gw.WarmUpstream(context.Background())
+			go s.syncNativeBrowserShield()
 			s.notifyMacOS("PeaceClaude 恢复放行", fmt.Sprintf("静态 IP 出口就绪：%s (%s)", res.EgressIP, res.Country))
 		}
 	})
 	return s
+}
+
+func (s *Server) syncNativeBrowserShield() {
+	cfg := s.configSnapshot()
+	snap := s.gate.Snapshot()
+	if _, err := launcher.EnsureNativeBrowserShield(&cfg, snap); err != nil {
+		log.Printf("[native-shield] sync skipped: %v", err)
+	}
 }
 
 func (s *Server) configSnapshot() config.Config {
@@ -225,6 +234,7 @@ func (s *Server) Start(ctx context.Context) error {
 		res := s.gate.Check(initCtx, false)
 		initCancel()
 		log.Printf("[peaceclaude] initial egress probe done | egress_ok=%t ip=%s", res.OK, res.EgressIP)
+		s.syncNativeBrowserShield()
 		s.probeLoop(runCtx)
 	}()
 	go s.hostLeakLoop(runCtx)
@@ -342,9 +352,14 @@ func (s *Server) probeLoop(ctx context.Context) {
 			timer.Stop()
 			return
 		case <-timer.C:
+			prevSnap := s.gate.Snapshot()
 			pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			s.gate.Check(pctx, true)
 			cancel()
+			curSnap := s.gate.Snapshot()
+			if curSnap.EffectiveTimezone != prevSnap.EffectiveTimezone || curSnap.EffectiveLanguage != prevSnap.EffectiveLanguage {
+				go s.syncNativeBrowserShield()
+			}
 		}
 	}
 }

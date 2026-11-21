@@ -377,6 +377,26 @@ func TestAutoPeaceSafetyGuards(t *testing.T) {
 	if !snapAfterFix.Egress.FailClosed || !snapAfterFix.Shield.TelemetryShield {
 		t.Fatalf("expected FailClosed and TelemetryShield enabled after fix, got %+v %+v", snapAfterFix.Egress.FailClosed, snapAfterFix.Shield.TelemetryShield)
 	}
+
+	// 7. Native browser shield inspection & selection persistence (with enable_pac=false to stay 100% sandboxed).
+	reqNBGet, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/api/native-browsers", nil)
+	rrNBGet := newResponseRecorder()
+	srv2.handleNativeBrowsers(rrNBGet, reqNBGet)
+	if rrNBGet.code != http.StatusOK || !strings.Contains(rrNBGet.body.String(), `"extension_ready":true`) {
+		t.Fatalf("expected /api/native-browsers ok + extension_ready=true, got %d: %s", rrNBGet.code, rrNBGet.body.String())
+	}
+
+	reqNBProtect, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/native-browsers/protect", bytes.NewBufferString(`{"browsers":["arc","chrome","invalid-browser"],"enable_pac":false}`))
+	reqNBProtect.Header.Set("Origin", "http://127.0.0.1")
+	rrNBProtect := newResponseRecorder()
+	srv2.withCSRF(srv2.handleNativeBrowsersProtect)(rrNBProtect, reqNBProtect)
+	if rrNBProtect.code != http.StatusOK || !strings.Contains(rrNBProtect.body.String(), `"ok":true`) {
+		t.Fatalf("expected /api/native-browsers/protect ok, got %d: %s", rrNBProtect.code, rrNBProtect.body.String())
+	}
+	nbCfg := srv2.configSnapshot()
+	if len(nbCfg.Shield.ProtectedBrowsers) != 2 || nbCfg.Shield.ProtectedBrowsers[0] != "arc" || nbCfg.Shield.ProtectedBrowsers[1] != "chrome" {
+		t.Fatalf("expected normalized ProtectedBrowsers [arc chrome], got %v", nbCfg.Shield.ProtectedBrowsers)
+	}
 }
 
 func TestHandleAccountUpdatePreservesManualLockAndStatusReflectsIdentity(t *testing.T) {

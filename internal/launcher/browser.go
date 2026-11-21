@@ -370,23 +370,27 @@ func ensureBrowserPrivacyPrefs(browserDir, lang string) error {
 	return os.WriteFile(localStatePath, lsOut, 0o600)
 }
 
+func buildAcceptLangSpec(lang string) (primary string, langsSlice []string, headerAccept string) {
+	primary, baseLang, _ := normalizeBrowserLanguage(lang)
+	switch {
+	case strings.EqualFold(primary, baseLang):
+		langsSlice = []string{primary}
+		headerAccept = primary + ";q=0.9"
+	case baseLang == "en":
+		langsSlice = []string{primary, "en"}
+		headerAccept = primary + ",en;q=0.9"
+	default:
+		langsSlice = []string{primary, baseLang, "en"}
+		headerAccept = primary + "," + baseLang + ";q=0.9,en;q=0.8"
+	}
+	return primary, langsSlice, headerAccept
+}
+
 func ensureBrowserShieldExtension(browserDir, lang string) (string, error) {
 	if strings.TrimSpace(browserDir) == "" {
 		return "", nil
 	}
-	primary, baseLang, _ := normalizeBrowserLanguage(lang)
-	var langsSlice []string
-	var headerAccept string
-	if strings.EqualFold(primary, baseLang) {
-		langsSlice = []string{primary}
-		headerAccept = primary + ";q=0.9"
-	} else if baseLang == "en" {
-		langsSlice = []string{primary, "en"}
-		headerAccept = primary + ",en;q=0.9"
-	} else {
-		langsSlice = []string{primary, baseLang, "en"}
-		headerAccept = primary + "," + baseLang + ";q=0.9,en;q=0.8"
-	}
+	primary, langsSlice, headerAccept := buildAcceptLangSpec(lang)
 
 	extDir := filepath.Join(browserDir, "peace-shield-ext")
 	if err := os.MkdirAll(extDir, 0o700); err != nil {
@@ -454,6 +458,41 @@ func ensureBrowserShieldExtension(browserDir, lang string) (string, error) {
 	}
 	return extDir, nil
 }
+
+const canvasCJKFontShieldSnippet = `  // Canvas CJK font-probing shield (neutralizes measureText enumeration without altering DOM CSS rendering)
+  try {
+    const CJK_FONT_RE = /(?:["']?)(?:Microsoft YaHei(?: UI)?|Microsoft JhengHei(?: UI)?|SimSun|NSimSun|SimHei|KaiTi|FangSong|DengXian|PingFang\s*(?:SC|TC|HK)|Hiragino Sans GB|STHeiti|STSong|Songti\s*(?:SC|TC)|Source Han (?:Sans|Serif)\s*(?:CN|SC|TW|HK)|Noto (?:Sans|Serif) CJK\s*(?:SC|TC|HK)?|WenQuanYi (?:Micro|Zen) Hei|PMingLiU|MingLiU|DFKai-SB)(?:["']?)\s*,?\s*/gi;
+    const patchFontProto = (proto) => {
+      if (!proto) return;
+      const desc = Object.getOwnPropertyDescriptor(proto, 'font');
+      if (!desc || !desc.set || !desc.get) return;
+      const origGet = desc.get;
+      const origSet = desc.set;
+      Object.defineProperty(proto, 'font', {
+        get: maskNative(function font() { return origGet.call(this); }, 'get font'),
+        set: maskNative(function font(val) {
+          let next = String(val);
+          if (CJK_FONT_RE.test(next)) {
+            CJK_FONT_RE.lastIndex = 0;
+            next = next.replace(CJK_FONT_RE, '')
+              .replace(/,\s*,+/g, ',')
+              .replace(/(\d+(?:\.\d+)?(?:px|pt|em|rem|ex|ch|vw|vh|%)\s*),+\s*/i, '$1 ')
+              .replace(/,\s*$/g, '')
+              .replace(/\s{2,}/g, ' ')
+              .trim();
+            if (/^\d+(?:\.\d+)?(?:px|pt|em|rem|ex|ch|vw|vh|%)$/i.test(next)) {
+              next = next + ' sans-serif';
+            }
+          }
+          return origSet.call(this, next);
+        }, 'set font'),
+        configurable: true,
+        enumerable: true,
+      });
+    };
+    if (typeof CanvasRenderingContext2D !== 'undefined') patchFontProto(CanvasRenderingContext2D.prototype);
+    if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') patchFontProto(OffscreenCanvasRenderingContext2D.prototype);
+  } catch {}`
 
 func buildShieldContentScript(localeJSON, langsJSON string) string {
 	const tmpl = `(() => {
@@ -544,44 +583,12 @@ func buildShieldContentScript(localeJSON, langsJSON string) string {
     }
   } catch {}
 
-  // 3. Canvas CJK font-probing shield (neutralizes measureText enumeration without altering DOM CSS rendering)
-  try {
-    const CJK_FONT_RE = /(?:["']?)(?:Microsoft YaHei(?: UI)?|Microsoft JhengHei(?: UI)?|SimSun|NSimSun|SimHei|KaiTi|FangSong|DengXian|PingFang\s*(?:SC|TC|HK)|Hiragino Sans GB|STHeiti|STSong|Songti\s*(?:SC|TC)|Source Han (?:Sans|Serif)\s*(?:CN|SC|TW|HK)|Noto (?:Sans|Serif) CJK\s*(?:SC|TC|HK)?|WenQuanYi (?:Micro|Zen) Hei|PMingLiU|MingLiU|DFKai-SB)(?:["']?)\s*,?\s*/gi;
-    const patchFontProto = (proto) => {
-      if (!proto) return;
-      const desc = Object.getOwnPropertyDescriptor(proto, 'font');
-      if (!desc || !desc.set || !desc.get) return;
-      const origGet = desc.get;
-      const origSet = desc.set;
-      Object.defineProperty(proto, 'font', {
-        get: maskNative(function font() { return origGet.call(this); }, 'get font'),
-        set: maskNative(function font(val) {
-          let next = String(val);
-          if (CJK_FONT_RE.test(next)) {
-            CJK_FONT_RE.lastIndex = 0;
-            next = next.replace(CJK_FONT_RE, '')
-              .replace(/,\s*,+/g, ',')
-              .replace(/(\d+(?:\.\d+)?(?:px|pt|em|rem|ex|ch|vw|vh|%)\s*),+\s*/i, '$1 ')
-              .replace(/,\s*$/g, '')
-              .replace(/\s{2,}/g, ' ')
-              .trim();
-            if (/^\d+(?:\.\d+)?(?:px|pt|em|rem|ex|ch|vw|vh|%)$/i.test(next)) {
-              next = next + ' sans-serif';
-            }
-          }
-          return origSet.call(this, next);
-        }, 'set font'),
-        configurable: true,
-        enumerable: true,
-      });
-    };
-    if (typeof CanvasRenderingContext2D !== 'undefined') patchFontProto(CanvasRenderingContext2D.prototype);
-    if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') patchFontProto(OffscreenCanvasRenderingContext2D.prototype);
-  } catch {}
+__CANVAS_CJK_SHIELD__
 })();
 `
 	return strings.NewReplacer(
 		"__TARGET_LOCALE__", localeJSON,
 		"__TARGET_LANGS__", langsJSON,
+		"__CANVAS_CJK_SHIELD__", canvasCJKFontShieldSnippet,
 	).Replace(tmpl)
 }

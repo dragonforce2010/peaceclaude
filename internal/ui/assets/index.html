@@ -310,7 +310,10 @@
                   <h2>浏览器环境信号自检</h2>
                   <p class="muted">核对当前页面所在浏览器的时区、语言、Intl 与隐私信号</p>
                 </div>
-                <button class="btn btn-secondary btn-sm" id="btn-launch-browser-fc" type="button" title="使用当前账号的隔离浏览器打开 https://fuck-claude.app/ 实测指纹得分">隔离浏览器实测</button>
+                <div class="btn-row">
+                  <button class="btn btn-ghost btn-sm" id="btn-go-native-shield" type="button" title="为本机 Arc / Chrome / Brave / Edge 开启 PAC 与域名定向护航扩展">原生浏览器护航</button>
+                  <button class="btn btn-secondary btn-sm" id="btn-launch-browser-fc" type="button" title="使用当前账号的隔离浏览器打开 https://fuck-claude.app/ 实测指纹得分">隔离浏览器实测</button>
+                </div>
               </div>
               <div class="fp-grid" id="browser-fp-grid"></div>
             </div>
@@ -723,7 +726,7 @@
           </div>
         </div>
 
-        <div id="sub-net-proxy">
+        <div id="sub-net-proxy" class="stack">
           <form id="form-network" class="stack">
             <div class="card">
               <div class="card-head">
@@ -806,6 +809,32 @@
               <div class="kv-list" id="rules-status-box"></div>
             </div>
           </form>
+
+          <div class="card" id="native-browsers-card">
+            <div class="card-head">
+              <div>
+                <h2>原生浏览器多选护航（Arc / Chrome / Brave / Edge）</h2>
+                <p class="muted">网络层 PAC 静态 IP + 域名定向 MV3 护航扩展（仅作用于 Claude 与 fuck-claude.app，飞书与日常网站零干预）</p>
+              </div>
+              <div class="btn-row">
+                <button type="button" class="btn btn-ghost btn-sm" id="btn-nb-refresh">刷新检测状态</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-nb-copy-path">复制扩展路径</button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-nb-apply">开启所选浏览器护航</button>
+              </div>
+            </div>
+            <div class="nb-meta-line" id="nb-meta-line">正在扫描本机浏览器与护航扩展状态…</div>
+            <div class="nb-browser-grid" id="nb-browser-grid"></div>
+            <div class="nb-guide-box hidden" id="nb-guide-box">
+              <div class="nb-guide-head">
+                <strong id="nb-guide-title">加载定向护航扩展</strong>
+                <div class="btn-row">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-nb-copy-exturl">复制扩展页地址</button>
+                  <button type="button" class="btn btn-ghost btn-sm" id="btn-nb-close-guide">收起</button>
+                </div>
+              </div>
+              <ol class="nb-guide-steps" id="nb-guide-steps"></ol>
+            </div>
+          </div>
         </div>
 
         <div id="sub-net-policy" class="hidden">
@@ -931,6 +960,7 @@
             </div>
             <div class="cli-cmd-line"><code>peaceclaude service restart</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude service restart" type="button">复制</button></div>
             <div class="cli-cmd-line"><code>peaceclaude browser-pac status</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude browser-pac status" type="button">复制</button></div>
+            <div class="cli-cmd-line"><code>peaceclaude browser-shield status</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude browser-shield status" type="button">复制</button></div>
             <div class="cli-cmd-line"><code>peaceclaude lock "manual check"</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude lock" type="button">复制</button></div>
             <div class="cli-cmd-line"><code>peaceclaude vm-proxy install</code><button class="btn btn-ghost btn-sm" data-copy-cmd="peaceclaude vm-proxy install" type="button">复制</button></div>
           </div>

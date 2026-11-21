@@ -1,10 +1,13 @@
 package host
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"peaceclaude/internal/config"
+	"peaceclaude/internal/egress"
 )
 
 func TestParseLsofDirectHit(t *testing.T) {
@@ -63,5 +66,30 @@ func TestVerifyIsolatedTimezone(t *testing.T) {
 	}
 	if !strings.Contains(out, "-0700") && !strings.Contains(out, "-0600") {
 		t.Fatalf("expected Denver UTC offset (-0700/-0600), got %q", out)
+	}
+}
+
+func TestDoctorPassedChecksHaveNoFixHint(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	cfg := config.Default()
+	_ = config.Save(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	rep := RunDoctor(ctx, cfg, false, egress.GateSnapshot{
+		EffectiveTimezone: "America/Denver",
+		EffectiveLanguage: "en-US",
+	})
+	passCount := 0
+	for _, c := range rep.Checks {
+		if c.Status == "pass" {
+			passCount++
+			if c.FixHint != "" || c.Fixable {
+				t.Fatalf("passed doctor check %q still has fix metadata: fix_hint=%q fixable=%v", c.ID, c.FixHint, c.Fixable)
+			}
+		}
+	}
+	if passCount < 4 {
+		t.Fatalf("expected at least 4 passed checks in offline doctor test, got %d", passCount)
 	}
 }

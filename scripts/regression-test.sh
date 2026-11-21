@@ -487,6 +487,45 @@ else
   fail "desktop_bundle_self_contained" "app bundle check failed ($APP_INSTALL_OUT)"
 fi
 
+# 16d. Verify passed doctor checks omit redundant fix_hint
+DOC_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/doctor")"
+if python3 - "$DOC_JSON" <<'PY'
+import json, sys
+rep = json.loads(sys.argv[1])
+checks = rep.get("checks", [])
+assert len(checks) >= 10, checks
+bad = [c["id"] for c in checks if c.get("status") == "pass" and (c.get("fix_hint") or c.get("fixable"))]
+assert not bad, f"passed checks carry fix_hint: {bad}"
+PY
+then
+  ok "doctor_pass_has_no_fix_hint" "all passed checks in /api/doctor omit redundant fix_hint"
+else
+  fail "doctor_pass_has_no_fix_hint" "unexpected fix_hint on passed doctor check"
+fi
+
+# 16e. Verify native browser shield API & extension generation without disturbing host network
+NB_GET="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/native-browsers")"
+NB_POST="$(curl -fsS -X POST "http://127.0.0.1:${CTRL_PORT}/api/native-browsers/protect" -H 'Content-Type: application/json' -d '{"browsers":["arc","chrome"],"enable_pac":false}')"
+if python3 - "$NB_GET" "$NB_POST" "$TMP_HOME" <<'PY'
+import json, os, sys
+g = json.loads(sys.argv[1])
+p = json.loads(sys.argv[2])
+home = sys.argv[3]
+assert g.get("extension_ready") is True, g
+assert "fuck-claude.app" in g.get("protected_domains", []), g
+assert p.get("ok") is True, p
+sel = {b["id"]: b["selected"] for b in p.get("report", {}).get("browsers", [])}
+assert sel.get("arc") is True and sel.get("chrome") is True, sel
+ext_dir = os.path.join(home, "extensions", "native-browser-shield")
+for fn in ["manifest.json", "rules.json", "config.js", "shield.js", "background.js", "popup.html", "popup.js", "icon48.png", "icon128.png"]:
+    assert os.path.isfile(os.path.join(ext_dir, fn)), f"missing {fn}"
+PY
+then
+  ok "native_browser_shield_api" "/api/native-browsers generated MV3 extension and persisted [arc, chrome] selection"
+else
+  fail "native_browser_shield_api" "native browser shield check failed"
+fi
+
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes
 if ps -axo command= | grep -F "$TMP_HOME" | grep -qv grep; then
   fail "sandbox_zero_desktop_interference" "sandbox regression spawned unexpected process referencing $TMP_HOME"

@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PeaceClaude — Zero-VM Static-IP Cockpit for Claude on macOS</title>
+  <meta name="description" content="Zero-VM, Fail-Closed static-IP control cockpit for Claude Desktop, Claude Code CLI, and native Arc/Chrome browsers on macOS." />
+  <link rel="icon" type="image/png" href="assets/peace-logo.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#top">
+        <img src="assets/peace-logo.png" alt="PeaceClaude" class="brand-logo" width="32" height="32" />
+        <span class="brand-name">PeaceClaude</span>
+        <span class="brand-ver">v0.2.0</span>
+      </a>
+
+      <nav class="nav-links" aria-label="Primary">
+        <a href="#switch-lab" data-i18n="nav_arch">Cockpit</a>
+        <a href="#benchmark" data-i18n="nav_compare">Zero-VM</a>
+        <a href="#surfaces" data-i18n="nav_surfaces">Shields</a>
+        <a href="#showcase" data-i18n="nav_preview">Showcase</a>
+        <a href="#download" data-i18n="nav_download">Install</a>
+      </nav>
+
+      <div class="header-actions">
+        <button type="button" class="pill-btn" id="btn-lang-toggle" title="Switch language / 切换语言">
+          <span id="lang-label">中文</span>
+        </button>
+        <button type="button" class="pill-btn icon-only" id="btn-theme-toggle" aria-label="Toggle theme" title="Toggle Light / Dark theme">
+          <span id="theme-icon">◐</span>
+        </button>
+        <a class="btn btn-primary btn-sm" href="#download" data-i18n="cta_download_short">Get v0.2.0</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- Hero + Interactive Peace Switch Simulator -->
+    <section class="hero-section" id="switch-lab">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow-chip">
+            <span class="pulse-dot"></span>
+            <span data-i18n="hero_eyebrow">macOS Universal (arm64 + x86_64) · ~18 MB Zero-VM Architecture</span>
+          </div>
+
+          <h1 data-i18n="hero_title">Native macOS Speed.<br/>Deterministic Static-IP Safety.</h1>
+
+          <p class="hero-lead" data-i18n="hero_lead">
+            Ditch the 8 GB Linux VM without risking naked proxy leaks. PeaceClaude wraps Claude Desktop, Claude Code CLI, and your native Arc &amp; Chrome browsers in a Fail-Closed static-IP gate, synced US timezone/locale, and verified 2/100 anti-fingerprint shield.
+          </p>
+
+          <div class="hero-cta-row">
+            <a class="btn btn-primary btn-lg" href="#download" data-i18n="hero_cta_primary">Download Universal DMG</a>
+            <button type="button" class="btn btn-secondary btn-lg" id="btn-hero-copy">
+              <code id="hero-copy-cmd">./install.sh</code>
+              <span class="copy-tag" id="hero-copy-tag" data-i18n="copy_label">Copy</span>
+            </button>
+          </div>
+
+          <div class="hero-metrics">
+            <div class="metric-pill">
+              <strong>~18 MB</strong>
+              <span data-i18n="metric_ram">Daemon RAM</span>
+            </div>
+            <div class="metric-pill">
+              <strong>&lt; 0.2s</strong>
+              <span data-i18n="metric_boot">Cold Launch</span>
+            </div>
+            <div class="metric-pill">
+              <strong>2 / 100</strong>
+              <span data-i18n="metric_risk">Scanner Risk Score</span>
+            </div>
+            <div class="metric-pill">
+              <strong>0 Deps</strong>
+              <span data-i18n="metric_deps">Pure Go Stdlib</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Original Interactive Instrument: The Peace Switch Telemetry Deck -->
+        <aside class="telemetry-deck" id="telemetry-deck" data-state="safe" aria-label="Interactive Isolation Telemetry Simulator">
+          <div class="deck-top">
+            <div>
+              <div class="deck-title" data-i18n="deck_title">Peace Switch Telemetry</div>
+              <div class="deck-sub" data-i18n="deck_sub">Toggle to compare naked host vs PeaceClaude posture</div>
+            </div>
+            <button type="button" class="peace-switch" id="peace-switch-btn" role="switch" aria-checked="true">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-text" id="switch-state-text">GUARDED</span>
+            </button>
+          </div>
+
+          <div class="deck-verdict-banner" id="deck-verdict-banner">
+            <div class="verdict-left">
+              <span class="verdict-badge" id="deck-verdict-badge">OPEN · FAIL-CLOSED</span>
+              <strong id="deck-verdict-headline">Static US IP Verified · Zero Host Leaks</strong>
+            </div>
+            <div class="verdict-score-wrap">
+              <span class="verdict-score-label" data-i18n="deck_score_label">Risk Score</span>
+              <span class="verdict-score" id="deck-risk-score">2 / 100</span>
+            </div>
+          </div>
+
+          <div class="deck-rows">
+            <div class="deck-row">
+              <span class="dk" data-i18n="dk_egress">Egress Route</span>
+              <code class="dv" id="dv-egress">203.0.113.42 · Cheyenne, US (Single-IP)</code>
+            </div>
+            <div class="deck-row">
+              <span class="dk" data-i18n="dk_tz">Runtime Timezone</span>
+              <code class="dv" id="dv-tz">America/Denver (UTC-7)</code>
+            </div>
+            <div class="deck-row">
+              <span class="dk" data-i18n="dk_locale">Locale &amp; Fonts</span>
+              <code class="dv" id="dv-locale">en-US · Canvas CJK Scrubber ON</code>
+            </div>
+            <div class="deck-row">
+              <span class="dk" data-i18n="dk_kernel">Kernel / Drop Safety</span>
+              <code class="dv" id="dv-kernel">HTTP 503 Guard + pfctl Anchor Armed</code>
+            </div>
+          </div>
+
+          <div class="deck-surfaces">
+            <div class="surface-chip" id="sc-cli">
+              <span class="sc-dot"></span>
+              <span>Claude Code CLI</span>
+              <small id="sc-cli-note">TZ + Env Stripped</small>
+            </div>
+            <div class="surface-chip" id="sc-desktop">
+              <span class="sc-dot"></span>
+              <span>Claude Desktop</span>
+              <small id="sc-desktop-note">Auto-Peace &amp; QUIC Off</small>
+            </div>
+            <div class="surface-chip" id="sc-browser">
+              <span class="sc-dot"></span>
+              <span>Arc / Chrome</span>
+              <small id="sc-browser-note">PAC + MV3 Shield</small>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Quantitative Zero-VM vs VM Comparison -->
+    <section class="section alt-band" id="benchmark">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker" data-i18n="cmp_kicker">ZERO-VM ENGINEERING</div>
+          <h2 data-i18n="cmp_title">Why carry an 8 GB Linux VM just to lock an IP and timezone?</h2>
+          <p data-i18n="cmp_desc">PeaceClaude enforces deterministic network fail-closing and browser/CLI fingerprint alignment at the OS user-space + pf kernel boundary — keeping macOS instant, silent, and battery-friendly.</p>
+        </div>
+
+        <div class="bench-grid">
+          <div class="bench-card">
+            <div class="bench-head">
+              <strong data-i18n="b_ram_title">Resident Memory</strong>
+              <span class="bench-delta">340× lighter</span>
+            </div>
+            <div class="bar-pair">
+              <div class="bar-row">
+                <span class="bar-lbl peace">PeaceClaude</span>
+                <div class="bar-track"><div class="bar-fill peace" style="width: 3%"></div></div>
+                <code class="bar-val">18 MB</code>
+              </div>
+              <div class="bar-row">
+                <span class="bar-lbl vm" data-i18n="lbl_vm">Linux Desktop VM</span>
+                <div class="bar-track"><div class="bar-fill vm" style="width: 100%"></div></div>
+                <code class="bar-val">6,144 MB</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-head">
+              <strong data-i18n="b_boot_title">Ready-to-Code Startup</strong>
+              <span class="bench-delta">150× faster</span>
+            </div>
+            <div class="bar-pair">
+              <div class="bar-row">
+                <span class="bar-lbl peace">PeaceClaude</span>
+                <div class="bar-track"><div class="bar-fill peace" style="width: 2%"></div></div>
+                <code class="bar-val">0.18 s</code>
+              </div>
+              <div class="bar-row">
+                <span class="bar-lbl vm" data-i18n="lbl_vm">Linux Desktop VM</span>
+                <div class="bar-track"><div class="bar-fill vm" style="width: 100%"></div></div>
+                <code class="bar-val">32.0 s</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-head">
+              <strong data-i18n="b_disk_title">Disk Footprint</strong>
+              <span class="bench-delta">1,000× smaller</span>
+            </div>
+            <div class="bar-pair">
+              <div class="bar-row">
+                <span class="bar-lbl peace">PeaceClaude</span>
+                <div class="bar-track"><div class="bar-fill peace" style="width: 1.5%"></div></div>
+                <code class="bar-val">16 MB</code>
+              </div>
+              <div class="bar-row">
+                <span class="bar-lbl vm" data-i18n="lbl_vm">Linux Desktop VM</span>
+                <div class="bar-track"><div class="bar-fill vm" style="width: 100%"></div></div>
+                <code class="bar-val">18.0 GB</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="bench-card">
+            <div class="bench-head">
+              <strong data-i18n="b_vpn_title">Corporate VPN (Feilian / Cisco)</strong>
+              <span class="bench-delta">Zero conflict</span>
+            </div>
+            <div class="bar-pair">
+              <div class="bar-row">
+                <span class="bar-lbl peace">PeaceClaude</span>
+                <div class="bar-track"><div class="bar-fill peace" style="width: 100%"></div></div>
+                <code class="bar-val" data-i18n="val_no_tun">No TUN · Coexists</code>
+              </div>
+              <div class="bar-row">
+                <span class="bar-lbl vm" data-i18n="lbl_tun">System TUN / VM Bridge</span>
+                <div class="bar-track"><div class="bar-fill vm" style="width: 35%"></div></div>
+                <code class="bar-val" data-i18n="val_conflict">Route Clash</code>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6-Card Bento Grid of Capabilities -->
+    <section class="section" id="surfaces">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker" data-i18n="bento_kicker">FULL-SURFACE ARCHITECTURE</div>
+          <h2 data-i18n="bento_title">Six engineered defense layers in one cohesive app.</h2>
+          <p data-i18n="bento_desc">From kernel packet anchors to browser MV3 Content Scripts, every surface stays aligned with your active profile.</p>
+        </div>
+
+        <div class="bento-grid">
+          <article class="bento-card">
+            <span class="bento-num">01</span>
+            <h3 data-i18n="f1_t">Fail-Closed Egress Gate + pf</h3>
+            <p data-i18n="f1_d">4-source parallel IP probe verifies your static node. On any IP drift or manual lock, the gateway returns hard 503, severs active streams, and drops direct IPv4/IPv6/UDP via pfctl.</p>
+          </article>
+
+          <article class="bento-card">
+            <span class="bento-num">02</span>
+            <h3 data-i18n="f2_t">Native Arc &amp; Chrome MV3 Shield</h3>
+            <p data-i18n="f2_d">Select Arc, Chrome, Brave, or Edge in the console: pairs Claude-only PAC routing with a domain-scoped MV3 extension achieving 2/100 LOW RISK without touching Slack, Lark, or work tabs.</p>
+          </article>
+
+          <article class="bento-card">
+            <span class="bento-num">03</span>
+            <h3 data-i18n="f3_t">Isolated Multi-Account Cockpit</h3>
+            <p data-i18n="f3_d">Separate config, Desktop user-data-dir, cookies, and UUID per account. Detects Free vs Pro/Max automatically, routes claude:// OAuth callbacks strictly to the active window, and guards native Claude.app launches.</p>
+          </article>
+
+          <article class="bento-card">
+            <span class="bento-num">04</span>
+            <h3 data-i18n="f4_t">11-Point Doctor &amp; 403 Triage</h3>
+            <p data-i18n="f4_d">Verifies remote SOCKS5 DNS, --disable-quic, WebRTC UDP suppression, and host socket scans. Smart 3-way diagnose separates transient network drops from real auth expiration before you touch Sign Out.</p>
+          </article>
+
+          <article class="bento-card">
+            <span class="bento-num">05</span>
+            <h3 data-i18n="f5_t">LAN &amp; Tailscale Mobile Remote</h3>
+            <p data-i18n="f5_d">Issue 120-second ISO-18004 SVG QR pairing passes backed by SHA-256 Bearer tokens to check quotas, swap active profiles, or lock egress from your phone with zero cloud relay servers.</p>
+          </article>
+
+          <article class="bento-card">
+            <span class="bento-num">06</span>
+            <h3 data-i18n="f6_t">30-Day Redacted Observability</h3>
+            <p data-i18n="f6_d">Local packet capture and Split-IP leak logs strip Authorization headers, Cookies, and OAuth tokens before hitting 0600 disk files, auto-pruned on a rolling 30-day schedule.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Interactive Workbench Showcase -->
+    <section class="section alt-band" id="showcase">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker" data-i18n="show_kicker">LIVE WORKBENCH TOUR</div>
+          <h2 data-i18n="show_title">Crafted as a quiet precision instrument.</h2>
+          <p data-i18n="show_desc">Built with zero external frontend frameworks. Inspect real sanitized captures from PeaceClaude v0.2.0 below.</p>
+        </div>
+
+        <div class="showcase-shell">
+          <div class="showcase-tabs" id="showcase-tabs" role="tablist">
+            <button type="button" class="sc-tab active" data-shot="accounts-overview.png" data-i18n="tab_acc" data-caption-en="Multi-account Hero cockpit with Pro 5h/Weekly telemetry bars, Free tier status, per-account security scores, and standby roster." data-caption-zh="三段式多账号焦点工作台：Pro 5h/Weekly 双列配额、Free 清晰提示、单账号安全得分与一键切号。">Multi-Account</button>
+            <button type="button" class="sc-tab" data-shot="security-doctor.png" data-i18n="tab_sec" data-caption-en="11/11 Security Doctor with live ring score, zero-clutter passed checks, browser fingerprint audit, and 1-click remediation." data-caption-zh="11/11 全链路安全体检：实时评分环、精简无冗余的通过项、浏览器指纹自检与 403 三分诊。">Security Doctor</button>
+            <button type="button" class="sc-tab" data-shot="native-browser-shield.png" data-i18n="tab_nb" data-caption-en="Multi-select native browser protection combining Claude-only PAC with domain-scoped MV3 Identity Shield detection." data-caption-zh="原生浏览器多选护航：结合仅分流 Claude 的系统 PAC 与域名定向 MV3 护航扩展实时状态扫描。">Native Browser Shield</button>
+            <button type="button" class="sc-tab" data-shot="appearance-studio.png" data-i18n="tab_app" data-caption-en="Appearance Studio with 6 light + 6 dark curated palettes, live miniature console stage, and custom accent pickers." data-caption-zh="外观工坊：浅深共 12 套原创调色板、实时微缩画布与字体尺度微调。">Appearance Studio</button>
+            <button type="button" class="sc-tab" data-shot="remote-pair.png" data-i18n="tab_rem" data-caption-en="LAN / Tailscale mobile pairing pass with 120s countdown and instant device revocation." data-caption-zh="零云端中继的局域网 / Tailscale 手机扫码配对通行证，带 120 秒倒计时与随手踢除。">Mobile Pairing</button>
+            <button type="button" class="sc-tab" data-shot="cli-guide.png" data-i18n="tab_cli" data-caption-en="Built-in categorized CLI launcher &amp; safety command cheatsheet with 1-click clipboard copy." data-caption-zh="内置四分类 CLI 终端命令速查与 PAC 安全提示，任意指令一键复制。">CLI Guide</button>
+          </div>
+
+          <div class="window-frame">
+            <div class="window-chrome">
+              <span class="win-dots"><i></i><i></i><i></i></span>
+              <span class="win-title mono">PeaceClaude — Multi-Account Cockpit · v0.2.0</span>
+            </div>
+            <img id="showcase-img" src="assets/accounts-overview.png" alt="PeaceClaude Workbench Screenshot" class="showcase-img" />
+          </div>
+          <p class="showcase-caption" id="showcase-caption">Multi-account Hero cockpit with Pro 5h/Weekly telemetry bars, Free tier status, per-account security scores, and standby roster.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Honest Boundaries + 30s Install -->
+    <section class="section" id="download">
+      <div class="container download-grid">
+        <div class="boundary-card">
+          <div class="section-kicker" data-i18n="bnd_kicker">HONEST ENGINEERING</div>
+          <h2 data-i18n="bnd_title">Transparent about what Zero-VM covers — and doesn't.</h2>
+          <ul class="boundary-list">
+            <li data-i18n="bnd_1"><strong>Network &amp; Fingerprint Guarantee:</strong> Fail-Closed static-IP routing, kernel <code>pf</code> IPv4/IPv6/UDP killswitch, isolated profile paths, host env scrubbing, and domain-scoped timezone/locale/CJK-font alignment.</li>
+            <li data-i18n="bnd_2"><strong>Same macOS UID Boundary:</strong> Unlike a hardware hypervisor VM, processes run under your macOS user account and share normal workspace file permissions — pair with OS permissions or containers if executing untrusted code.</li>
+            <li data-i18n="bnd_3"><strong>Native Browser Opt-In:</strong> Modern macOS Chromium/Arc blocks silent unsigned extension injection; PeaceClaude generates the auditable MV3 folder locally and guides a 10-second developer-mode load.</li>
+          </ul>
+        </div>
+
+        <div class="install-card">
+          <div class="section-kicker" data-i18n="ins_kicker">30-SECOND INSTALL · v0.2.0</div>
+          <h2 data-i18n="ins_title">Ready for Apple Silicon &amp; Intel Macs.</h2>
+
+          <div class="install-tabs" id="install-tabs">
+            <button type="button" class="ins-tab active" data-mode="dmg">Universal DMG</button>
+            <button type="button" class="ins-tab" data-mode="tar">Offline tar.gz</button>
+            <button type="button" class="ins-tab" data-mode="src">Build from Source</button>
+          </div>
+
+          <pre class="install-code" id="install-code"><code># 1. Download PeaceClaude-v0.2.0-macos-universal.dmg from GitHub Releases
+# 2. Drag PeaceClaude.app into Applications &amp; run Install-PeaceClaude-CLI.command
+# 3. Verify checksum &amp; clear ad-hoc quarantine if prompted:
+xattr -dr com.apple.quarantine /Applications/PeaceClaude.app</code></pre>
+
+          <div class="install-foot">
+            <button type="button" class="btn btn-primary" id="btn-copy-install" data-i18n="ins_copy">Copy Steps</button>
+            <a class="btn btn-ghost" href="../README.md" data-i18n="ins_docs">Read Full Docs</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/peace-logo.png" alt="" width="22" height="22" />
+        <span>PeaceClaude v0.2.0</span>
+        <span class="muted" data-i18n="foot_note">Zero-VM Static-IP Security Cockpit for macOS</span>
+      </div>
+      <div class="footer-links">
+        <a href="../README.md">README (EN)</a>
+        <a href="../README.zh-CN.md">简体中文文档</a>
+        <a href="../docs/CLI_GUIDE.md">CLI Guide</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
