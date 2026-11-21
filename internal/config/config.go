@@ -14,13 +14,25 @@ import (
 const CurrentVersion = 1
 
 type ListenConfig struct {
-	BindAddr       string   `json:"bind_addr"`
-	HTTPPort       int      `json:"http_port"`
-	SOCKS5Port     int      `json:"socks5_port"`
-	ControlPort    int      `json:"control_port"`
-	VMProxyEnabled bool     `json:"vm_proxy_enabled"`
-	VMProxyBind    string   `json:"vm_proxy_bind,omitempty"`
-	VMProxySubnets []string `json:"vm_proxy_subnets,omitempty"`
+	BindAddr             string   `json:"bind_addr"`
+	HTTPPort             int      `json:"http_port"`
+	SOCKS5Port           int      `json:"socks5_port"`
+	ControlPort          int      `json:"control_port"`
+	AutoEnableBrowserPAC *bool    `json:"auto_enable_browser_pac,omitempty"`
+	BrowserPACPaused     bool     `json:"browser_pac_paused,omitempty"`
+	VMProxyEnabled       bool     `json:"vm_proxy_enabled"`
+	VMProxyBind          string   `json:"vm_proxy_bind,omitempty"`
+	VMProxySubnets       []string `json:"vm_proxy_subnets,omitempty"`
+}
+
+func (c *Config) ShouldAutoEnableBrowserPAC() bool {
+	if c == nil || c.Listen.BrowserPACPaused {
+		return false
+	}
+	if c.Listen.AutoEnableBrowserPAC != nil {
+		return *c.Listen.AutoEnableBrowserPAC
+	}
+	return true
 }
 
 type UpstreamConfig struct {
@@ -64,6 +76,7 @@ type ShieldConfig struct {
 	TelemetryShield      bool     `json:"telemetry_shield"`
 	BlockPrivateTargets  bool     `json:"block_private_targets"`
 	AllowCorporateDirect bool     `json:"allow_corporate_direct"`
+	ProxyAuthDomains     bool     `json:"proxy_auth_domains"`
 	CorporateDomains     []string `json:"corporate_domains,omitempty"`
 	ExtraBlockedDomains  []string `json:"extra_blocked_domains,omitempty"`
 	ExtraClaudeDomains   []string `json:"extra_claude_domains,omitempty"`

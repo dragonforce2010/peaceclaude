@@ -92,11 +92,26 @@ func TestAuthDomainsContainGoogleOAuthAssetsAndExcludeWWWGoogle(t *testing.T) {
 		}
 	}
 
-	// Regular Google Search MUST NOT be forced into auth/proxy list so PAC stays DIRECT for daily search.
-	for _, pubHost := range []string{"www.google.com", "google.com", "mail.google.com"} {
+	// Regular Google Search & Chrome background domains MUST NOT be forced into auth/proxy list so PAC stays DIRECT.
+	for _, pubHost := range []string{"www.google.com", "google.com", "mail.google.com", "update.googleapis.com", "safebrowsing.googleapis.com"} {
 		if cat := eng.Classify(pubHost); cat != CategoryPublic {
 			t.Fatalf("expected %s to remain public/direct, got %s", pubHost, cat)
 		}
+	}
+
+	// Default strict Claude-only mode (ProxyAuthDomains=false) MUST keep auth/OAuth domains DIRECT.
+	dAuthDirect := eng.Evaluate("accounts.google.com:443", true, "")
+	if dAuthDirect.Action != ActionDirectLocal {
+		t.Fatalf("expected accounts.google.com to route direct in default Claude-only mode, got %+v", dAuthDirect)
+	}
+
+	// Opt-in ProxyAuthDomains=true routes CategoryAuth through static-IP upstream.
+	cfgOpt := config.Default()
+	cfgOpt.Shield.ProxyAuthDomains = true
+	engOpt := NewEngine(cfgOpt)
+	dAuthProxy := engOpt.Evaluate("accounts.google.com:443", true, "")
+	if dAuthProxy.Action != ActionProxy {
+		t.Fatalf("expected accounts.google.com to route proxy when ProxyAuthDomains=true, got %+v", dAuthProxy)
 	}
 }
 

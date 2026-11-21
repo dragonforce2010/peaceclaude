@@ -46,9 +46,13 @@ func InspectBrowserPAC(cfg *config.Config) BrowserPACStatus {
 	st.ActiveServices = listActiveNetworkServices()
 	st.MatchesPeace = st.SystemPACEnable && strings.HasPrefix(st.CurrentPACURL, pacURL)
 	if st.MatchesPeace {
-		st.Note = "系统 PAC 已指向 PeaceClaude：Chrome/Safari/Arc/Edge 访问 Claude 域名将自动走静态 IP Fail-Closed 网关，其他网站和飞连内网保持直连。"
+		if cfg != nil && cfg.Shield.ProxyAuthDomains {
+			st.Note = "系统 PAC 已指向 PeaceClaude：Claude 与 Google/Apple 登录辅助域将走静态 IP 网关，其余网站保持本机正常网络直连。"
+		} else {
+			st.Note = "系统 PAC 已指向 PeaceClaude（严格仅 Claude 模式）：仅 Claude/Anthropic 域名与官方 IP 走静态 IP 网关，Google 登录与一切其余网站均走本机正常直连。"
+		}
 	} else {
-		st.Note = "普通浏览器目前未绑定 PeaceClaude PAC；可运行 `peaceclaude browser-pac on` 让所有主流浏览器访问 Claude 时自动走静态 IP 门禁，或使用 `peaceclaude login-browser` 获得完整指纹/时区/Cookie 隔离。"
+		st.Note = "普通浏览器目前未绑定 PeaceClaude PAC；默认严格仅将 Claude 相关域名路由至静态 IP，可在「网络与策略」或此处一键恢复开启。"
 	}
 	return st
 }

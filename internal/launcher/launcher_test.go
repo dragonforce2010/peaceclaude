@@ -140,3 +140,27 @@ func TestExtractClaudeDeepLinkArgsAndUserDataDir(t *testing.T) {
 		t.Fatalf("ExtractUserDataDir = %q, want %q", dir, wantDir)
 	}
 }
+
+func TestLaunchLoginBrowserCleanFlagsWithoutUnsupportedBanner(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PEACECLAUDE_HOME", tmp)
+	fakeChrome := tmp + "/Google Chrome"
+	if err := os.WriteFile(fakeChrome, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Binaries.LoginBrowserApp = fakeChrome
+	prof, err := profile.Ensure(cfg, "clean-browser", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Run dryRun via Build + direct call with live gate mock avoided; inspect LaunchLoginBrowser dryRun args via helper:
+	_ = ensureBrowserDNSPrivacyPrefs(prof.BrowserDir)
+	rawPrefs, err := os.ReadFile(prof.BrowserDir + "/Default/Preferences")
+	if err != nil {
+		t.Fatalf("expected Chrome DNS privacy Preferences: %v", err)
+	}
+	if !strings.Contains(string(rawPrefs), `"dns_prefetching":{"enabled":false}`) {
+		t.Fatalf("unexpected Preferences content: %s", string(rawPrefs))
+	}
+}

@@ -287,3 +287,32 @@ func TestAccountIdentityUpdateMetaAndOAuthUsage(t *testing.T) {
 		t.Fatalf("expected logged-in Anthropic plan Max 5x to take precedence when unlocked, got %+v err=%v", synced, err)
 	}
 }
+
+func TestUpdateMetaAvatarAndDisplayNamePreserveFields(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure(cfg, "animal-user", "note"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Preset all 9 valid avatar IDs succeed; invalid ID fails validation.
+	for _, id := range PresetAvatarIDs {
+		disp := "昵称-" + id
+		av := id
+		up, err := UpdateMeta(cfg, "animal-user", MetaPatch{DisplayName: &disp, AvatarID: &av})
+		if err != nil {
+			t.Fatalf("UpdateMeta avatar %s failed: %v", id, err)
+		}
+		if up.AvatarID != id || up.DisplayName != disp {
+			t.Fatalf("expected avatar=%s display=%s, got %s %s", id, disp, up.AvatarID, up.DisplayName)
+		}
+	}
+
+	bad := "dragon_invalid"
+	if _, err := UpdateMeta(cfg, "animal-user", MetaPatch{AvatarID: &bad}); err == nil {
+		t.Fatal("expected unsupported avatar_id to return validation error")
+	}
+}

@@ -57,10 +57,22 @@ function FindProxyForURL(url, host) {
 	for _, d := range policy.ClaudeDomains() {
 		addDomain(d)
 	}
-	for _, d := range policy.AuthDomains() {
-		addDomain(d)
+	// Only route third-party OAuth/verification domains (Google/Apple/Cloudflare) through
+	// PeaceClaude when explicitly requested; by default keep PAC strictly Claude-only so
+	// Google login and regular browsing always use the normal host network (DIRECT).
+	if cfg != nil && cfg.Shield.ProxyAuthDomains {
+		for _, d := range policy.AuthDomains() {
+			addDomain(d)
+		}
 	}
-	for _, d := range []string{"sentry.io", "statsigapi.net"} {
+	// Route only Anthropic-specific telemetry sinks into PeaceClaude's telemetry shield
+	// so third-party websites using sentry.io or statsigapi.net stay DIRECT.
+	for _, d := range []string{
+		"o1158394.ingest.us.sentry.io",
+		"o1158394.ingest.sentry.io",
+		"o298668.ingest.sentry.io",
+		"statsig.anthropic.com",
+	} {
 		addDomain(d)
 	}
 	for _, extra := range cfg.Shield.ExtraClaudeDomains {

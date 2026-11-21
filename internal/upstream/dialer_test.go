@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -275,5 +276,118 @@ func TestHTTPConnectDialerAuth(t *testing.T) {
 	dPool.poolMu.Unlock()
 	if afterDrain != 0 {
 		t.Fatalf("expected 0 warm connections after DrainPool, got %d", afterDrain)
+	}
+}
+
+func TestDirectHTTPRoutesGoogleAndResetsViaSOCKS5(t *testing.T) {
+	echoAddr, stopEcho := startEchoServer(t)
+	defer stopEcho()
+
+	// Dual-protocol upstream listener:
+	// - Resets plaintext HTTP CONNECT (simulating DPI RST on Google / sensitive domains)
+	// - Accepts binary SOCKS5 connections transparently on the same host:port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	var httpConnectCount, socks5Count atomic.Int32
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				var first [1]byte
+				if _, err := io.ReadFull(conn, first[:]); err != nil {
+					return
+				}
+				if first[0] == 0x05 {
+					socks5Count.Add(1)
+					var nMethods [1]byte
+					if _, err := io.ReadFull(conn, nMethods[:]); err != nil {
+						return
+					}
+					methods := make([]byte, nMethods[0])
+					if _, err := io.ReadFull(conn, methods); err != nil {
+						return
+					}
+					_, _ = conn.Write([]byte{0x05, 0x02})
+					var authHdr [2]byte
+					if _, err := io.ReadFull(conn, authHdr[:]); err != nil {
+						return
+					}
+					u := make([]byte, authHdr[1])
+					_, _ = io.ReadFull(conn, u)
+					var plen [1]byte
+					_, _ = io.ReadFull(conn, plen[:])
+					pw := make([]byte, plen[0])
+					_, _ = io.ReadFull(conn, pw)
+					_, _ = conn.Write([]byte{0x01, 0x00})
+					var reqHdr [4]byte
+					_, _ = io.ReadFull(conn, reqHdr[:])
+					if reqHdr[3] == 0x03 {
+						var l [1]byte
+						_, _ = io.ReadFull(conn, l[:])
+						d := make([]byte, l[0])
+						_, _ = io.ReadFull(conn, d)
+					}
+					var pbuf [2]byte
+					_, _ = io.ReadFull(conn, pbuf[:])
+					dst, err := net.Dial("tcp", echoAddr)
+					if err != nil {
+						return
+					}
+					defer dst.Close()
+					_, _ = conn.Write([]byte{0x05, 0x00, 0x00, 0x01, 127, 0, 0, 1, 0, 0})
+					go func() { _, _ = io.Copy(dst, conn) }()
+					_, _ = io.Copy(conn, dst)
+					return
+				}
+				// Plaintext HTTP CONNECT -> abruptly close (simulates TCP reset DPI)
+				httpConnectCount.Add(1)
+			}(c)
+		}
+	}()
+
+	d := &Dialer{
+		Mode:     "direct-http",
+		Address:  ln.Addr().String(),
+		Username: "u1",
+		Password: "p1",
+		Timeout:  3 * time.Second,
+	}
+
+	// 1. First dial to accounts.google.com hits HTTP CONNECT reset, learns to fallback via SOCKS5
+	c1, err := d.DialContext(context.Background(), "tcp", "accounts.google.com:443")
+	if err != nil {
+		t.Fatalf("accounts.google.com dial failed: %v", err)
+	}
+	_, _ = c1.Write([]byte("goog"))
+	buf1 := make([]byte, 4)
+	if _, err := io.ReadFull(c1, buf1); err != nil || string(buf1) != "goog" {
+		t.Fatalf("unexpected google roundtrip: err=%v buf=%q", err, buf1)
+	}
+	_ = c1.Close()
+	if httpConnectCount.Load() != 1 || socks5Count.Load() != 1 {
+		t.Fatalf("expected 1 HTTP reset -> 1 SOCKS5 fallback, got http=%d socks=%d", httpConnectCount.Load(), socks5Count.Load())
+	}
+
+	// 2. Second dial to learned accounts.google.com goes straight to SOCKS5 without hitting HTTP reset
+	c2, err := d.DialContext(context.Background(), "tcp", "accounts.google.com:443")
+	if err != nil {
+		t.Fatalf("accounts.google.com learned SOCKS5 dial failed: %v", err)
+	}
+	_, _ = c2.Write([]byte("clau"))
+	buf2 := make([]byte, 4)
+	if _, err := io.ReadFull(c2, buf2); err != nil || string(buf2) != "clau" {
+		t.Fatalf("unexpected learned SOCKS5 roundtrip: err=%v buf=%q", err, buf2)
+	}
+	_ = c2.Close()
+	if httpConnectCount.Load() != 1 || socks5Count.Load() != 2 {
+		t.Fatalf("expected learned host to bypass HTTP CONNECT directly (http=1, socks=2), got http=%d socks=%d", httpConnectCount.Load(), socks5Count.Load())
 	}
 }

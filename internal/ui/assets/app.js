@@ -57,6 +57,7 @@
     frost: { name: '雾银仪表', desc: '微冷灰蓝工业表面配澄明钴蓝信号', accent: '#005fb8', bg: '#f5f7fa', text: '#111827' },
     stone: { name: '浅砾灰白', desc: '哑光矿石浅灰与苍松静谧绿强调', accent: '#0f766e', bg: '#f6f8f7', text: '#14201c' },
     chalk: { name: '高对比粉白', desc: '纯净高反差白底配深墨碳黑读数', accent: '#2563eb', bg: '#ffffff', text: '#111111' },
+    porcelain: { name: '青瓷微雾', desc: '淡雅天青釉底配沉稳石青点缀', accent: '#0e7490', bg: '#f3f7f8', text: '#132125' },
   };
   const DARK_PRESETS = {
     obsidian: { name: '墨曜石墨', desc: '默认拉丝石墨工作台与低饱和陶土信号橙', accent: '#e07a55', bg: '#141415', text: '#ededed' },
@@ -64,7 +65,33 @@
     slate: { name: '玄岩冷灰', desc: '中性炭黑表面与高可读冷水蓝按钮', accent: '#3b82f6', bg: '#18181b', text: '#f4f4f5' },
     amber: { name: '夜班琥珀', desc: '深蓝褐夜班台配温和琥珀指针高亮', accent: '#e6b450', bg: '#12151c', text: '#cbc7be' },
     moss: { name: '深松静谧', desc: '幽暗苔藓碳底与松石绿状态灯组合', accent: '#34d399', bg: '#0f1412', text: '#e6edea' },
+    plum: { name: '曜紫极夜', desc: '深邃紫曜暗底配柔和绛紫亮标', accent: '#a78bfa', bg: '#13111c', text: '#ede9fe' },
   };
+  const ANIMAL_AVATARS = [
+    { id: 'tiger', label: '眼镜虎' },
+    { id: 'lion', label: '金狮' },
+    { id: 'eagle', label: '苍鹰' },
+    { id: 'fox', label: '赤狐' },
+    { id: 'panda', label: '熊猫' },
+    { id: 'shiba', label: '柴犬' },
+    { id: 'owl', label: '枭鹫' },
+    { id: 'koala', label: '考拉' },
+    { id: 'wolf', label: '银狼' },
+  ];
+  const ANIMAL_AVATAR_MAP = Object.fromEntries(ANIMAL_AVATARS.map((x) => [x.id, x]));
+  function resolveAvatarID(a) {
+    if (a && a.avatar_id && ANIMAL_AVATAR_MAP[a.avatar_id]) return a.avatar_id;
+    const key = String((a && a.name) || 'default');
+    if (key === 'default') return 'tiger';
+    let h = 0;
+    for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+    return ANIMAL_AVATARS[h % ANIMAL_AVATARS.length].id;
+  }
+  function avatarMediaHTML(a) {
+    const id = resolveAvatarID(a);
+    const label = ANIMAL_AVATAR_MAP[id]?.label || '头像';
+    return `<img class="avatar-img" src="/avatars/${esc(id)}.png" alt="${esc(label)}" />`;
+  }
   const LEGACY_LIGHT_MAP = {
     codex: 'paper', graphite: 'paper', warm: 'linen', solarized: 'linen', 'vscode-modern': 'frost', evergreen: 'stone',
   };
@@ -363,19 +390,6 @@
     if ($('select-code-font')) $('select-code-font').value = appearanceState.code_font || '';
     if ($('select-ui-size')) $('select-ui-size').value = String(appearanceState.ui_font_size || 14);
     if ($('select-code-size')) $('select-code-size').value = String(appearanceState.code_font_size || 12);
-
-    // Saved Theme Snapshots Chips
-    const chipsBox = $('saved-theme-chips');
-    if (chipsBox) {
-      const list = appearanceState.saved_themes || [];
-      chipsBox.innerHTML = list.length === 0
-        ? '<span class="muted">暂无已保存方案</span>'
-        : list.map((t) => `
-          <div class="theme-chip ${appearanceState.active_saved_theme === t.id ? 'active' : ''}" data-apply-saved="${esc(t.id)}">
-            <span>${esc(t.name)}</span>
-            <button type="button" class="theme-chip-del" data-del-saved="${esc(t.id)}" title="删除方案">×</button>
-          </div>`).join('');
-    }
   }
 
   // --- Navigation & Network Subtabs ---
@@ -464,9 +478,12 @@
     $('sb-gateway-ports').textContent = `:${s.config?.listen?.http_port || 18897}`;
 
     const hostUser = s.host_user || 'local';
-    $('sb-host-avatar').textContent = Array.from(hostUser)[0]?.toUpperCase() || 'P';
-    $('sb-host-name').textContent = hostUser;
-    $('sb-active-summary').textContent = `本地隔离 · ${s.active_profile || 'default'}`;
+    const activeAcct = (accountsData?.accounts || []).find((a) => a.active || a.name === s.active_profile);
+    const activeAvatar = s.active_avatar_id || activeAcct?.avatar_id || '';
+    const activeDisplay = s.active_display_name || activeAcct?.display_name || hostUser;
+    $('sb-host-avatar').innerHTML = avatarMediaHTML({ name: s.active_profile || 'default', avatar_id: activeAvatar });
+    $('sb-host-name').textContent = activeDisplay;
+    $('sb-active-summary').textContent = `本地隔离 · @${s.active_profile || 'default'}`;
 
     if ($('nav-account-count')) $('nav-account-count').textContent = String(s.profiles_count || 1);
 
@@ -534,6 +551,30 @@
   }
 
   // --- Accounts: Hero Instrument Stage + Compact Roster ---
+  function renderAvatarPicker(containerId, hiddenInputId, selectedId) {
+    const box = $(containerId);
+    const input = $(hiddenInputId);
+    const activeId = (selectedId && ANIMAL_AVATAR_MAP[selectedId]) ? selectedId : 'tiger';
+    if (input) input.value = activeId;
+    if (!box) return;
+    box.innerHTML = ANIMAL_AVATARS.map((item) => `
+      <button type="button" class="avatar-choice ${item.id === activeId ? 'active' : ''}" data-avatar-pick="${esc(item.id)}" title="${esc(item.label)}">
+        <img src="/avatars/${esc(item.id)}.png" alt="${esc(item.label)}" />
+        <span>${esc(item.label)}</span>
+      </button>`).join('');
+  }
+  function bindAvatarPicker(containerId, hiddenInputId) {
+    $(containerId)?.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('button[data-avatar-pick]');
+      if (!btn) return;
+      const picked = btn.dataset.avatarPick;
+      const input = $(hiddenInputId);
+      if (input) input.value = picked;
+      $(containerId).querySelectorAll('button[data-avatar-pick]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.avatarPick === picked);
+      });
+    });
+  }
   function avatarInitial(a) {
     const src = (a.account && a.account.email) || a.display_name || a.name || 'C';
     return String(src).trim().charAt(0).toUpperCase();
@@ -625,7 +666,7 @@
         <article class="card hero-account-card" data-acc-card="${esc(hero.name)}">
           <div class="hero-account-left">
             <div class="account-title-wrap">
-              <div class="avatar-circle">${esc(avatarInitial(hero))}</div>
+              <div class="avatar-circle lg" title="点击「详情与编辑」可切换 9 款 3D 动物头像">${avatarMediaHTML(hero)}</div>
               <div>
                 <div class="account-title-line">
                   <h3 class="account-name">${esc(hero.display_name || hero.name)}</h3>
@@ -683,7 +724,7 @@
         return `
           <div class="roster-row" data-acc-card="${esc(a.name)}">
             <div class="roster-col-id">
-              <div class="avatar-circle">${esc(avatarInitial(a))}</div>
+              <div class="avatar-circle">${avatarMediaHTML(a)}</div>
               <div>
                 <div class="roster-name-line">
                   <strong>${esc(a.display_name || a.name)}</strong>
@@ -732,7 +773,7 @@
     const usage = a.usage || {};
     const activated = isAccountActivated(a);
 
-    $('det-avatar').textContent = avatarInitial(a);
+    $('det-avatar').innerHTML = avatarMediaHTML(a);
     $('det-display-name').textContent = a.display_name || a.name;
     $('det-plan-badge').textContent = acct.plan_label || '未识别';
     $('det-activated-tag').classList.toggle('hidden', !activated);
@@ -783,6 +824,7 @@
     $('det-identity-kv').innerHTML = kvRows.map(([k, v]) => `<div class="kv-row"><span>${esc(k)}</span><code>${esc(v)}</code></div>`).join('');
 
     $('det-edit-display').value = a.display_name || '';
+    renderAvatarPicker('det-avatar-picker', 'det-edit-avatar', resolveAvatarID(a));
     $('det-edit-note').value = a.note || '';
     $('det-edit-plan').value = a.manual_plan || '';
     $('det-edit-reg').value = a.manual_registered_at || '';
@@ -828,16 +870,27 @@
       $('doctor-anomaly-box').classList.remove('hidden');
     }
 
+    const fixAllBtn = $('btn-fix-all-doctor');
+    const fixableCount = (doc.checks || []).filter((c) => c.status !== 'pass' && c.fixable && c.fix_action).length;
+    if (fixAllBtn) {
+      fixAllBtn.disabled = fixableCount === 0;
+      fixAllBtn.textContent = fixableCount > 0 ? `一键修复全部 (${fixableCount})` : '全部安全项已就绪';
+    }
+
     $('doctor-checks').innerHTML = (doc.checks || []).map((c) => {
       const fixText = c.fix_hint || c.remediation || '';
+      const canFix = c.status !== 'pass' && c.fixable && c.fix_action;
       return `
       <div class="check-row">
-        <span class="status-tag ${esc(c.status)}">${c.status === 'pass' ? '通过' : c.status === 'warn' ? '提醒' : '失败'}</span>
-        <div>
-          <div class="check-title">${esc(c.title)}</div>
-          <div class="check-detail">${esc(c.detail)}</div>
-          ${fixText ? `<div class="check-fix">建议：${esc(fixText)}</div>` : ''}
+        <div class="check-row-left">
+          <span class="status-tag ${esc(c.status)}">${c.status === 'pass' ? '通过' : c.status === 'warn' ? '提醒' : '失败'}</span>
+          <div>
+            <div class="check-title">${esc(c.title)}</div>
+            <div class="check-detail">${esc(c.detail)}</div>
+            ${fixText ? `<div class="check-fix">建议：${esc(fixText)}</div>` : ''}
+          </div>
         </div>
+        ${canFix ? `<div class="check-row-act"><button type="button" class="btn ${c.status === 'fail' ? 'btn-primary' : 'btn-secondary'} btn-sm" data-doc-fix-id="${esc(c.id)}" data-doc-fix-act="${esc(c.fix_action)}">${esc(c.fix_label || '一键修复')}</button></div>` : ''}
       </div>`;
     }).join('');
   }
@@ -885,6 +938,7 @@
     $('cfg-skip-sse').checked = !!cfg.egress.skip_probe_during_sse;
     $('cfg-strip-host-env').checked = !!cfg.identity.strip_host_anthropic_env;
     $('cfg-corp-direct').checked = !!cfg.shield.allow_corporate_direct;
+    if ($('cfg-proxy-auth-domains')) $('cfg-proxy-auth-domains').checked = !!cfg.shield.proxy_auth_domains;
     $('cfg-vm-proxy').checked = !!cfg.listen.vm_proxy_enabled;
     $('cfg-cred-hint').textContent = cfg.upstream.has_credentials ? '上游账密已加密存盘（界面不回显）' : '当前上游无认证凭据';
   }
@@ -1016,10 +1070,16 @@
       banner.classList.remove('hidden');
       if (hits.length === 0) {
         banner.className = 'host-sockets-banner';
-        banner.textContent = 'lsof 扫描未发现宿主机进程直连 Anthropic CIDR';
+        banner.innerHTML = '<span>lsof 扫描未发现宿主机进程直连 Anthropic CIDR</span>';
       } else {
         banner.className = 'host-sockets-banner danger';
-        banner.textContent = `告警：发现 ${hits.length} 个直连 Anthropic Socket（${hits.map((h) => `${h.process || h.command || '未知进程'}(PID ${h.pid}) -> ${h.dest_ip || ''}`).join(', ')}）`;
+        const hitList = hits.map((h) => `${h.process || h.command || '未知进程'}(PID ${h.pid}) -> ${h.dest_ip || ''}`).join(', ');
+        banner.innerHTML = `
+          <span>告警：发现 ${hits.length} 个直连 Anthropic Socket（${esc(hitList)}）</span>
+          <div class="btn-row">
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-leak-enable-pac">开启浏览器 PAC</button>
+            <button type="button" class="btn btn-primary btn-sm" id="btn-leak-rescan">重新扫描</button>
+          </div>`;
       }
       const events = d.events || [];
       $('leaks-tbody').innerHTML = events.length === 0
@@ -1102,6 +1162,49 @@
   $('pop-go-remote').addEventListener('click', () => { closeCommandSheet(); switchTab('remote'); });
   $('pop-go-settings').addEventListener('click', () => { closeCommandSheet(); switchTab('network'); });
   $('pop-go-storage').addEventListener('click', () => { closeCommandSheet(); switchTab('storage'); });
+
+  bindAvatarPicker('id-avatar-picker', 'id-edit-avatar');
+  bindAvatarPicker('det-avatar-picker', 'det-edit-avatar');
+  $('pop-edit-identity')?.addEventListener('click', async () => {
+    closeCommandSheet();
+    const profName = statusData?.active_profile || 'default';
+    let activeAcct = (accountsData?.accounts || []).find((a) => a.active || a.name === profName);
+    if (!activeAcct) {
+      try {
+        const list = await api('/api/accounts');
+        accountsData = list;
+        activeAcct = (list.accounts || []).find((a) => a.active || a.name === profName);
+      } catch {}
+    }
+    const curDisplay = activeAcct?.display_name ?? statusData?.active_display_name ?? '';
+    const curAvatar = activeAcct?.avatar_id || statusData?.active_avatar_id || '';
+    $('id-modal-sub').textContent = `作用于当前活跃账号档案 @${profName} 及左下角身份标识`;
+    $('id-edit-display').value = curDisplay;
+    renderAvatarPicker('id-avatar-picker', 'id-edit-avatar', resolveAvatarID({ name: profName, avatar_id: curAvatar }));
+    $('identity-modal').classList.remove('hidden');
+    $('id-edit-display').focus();
+  });
+  const closeIdentityModal = () => $('identity-modal')?.classList.add('hidden');
+  $('id-modal-close')?.addEventListener('click', closeIdentityModal);
+  $('id-btn-cancel')?.addEventListener('click', closeIdentityModal);
+  $('identity-modal')?.addEventListener('click', (ev) => {
+    if (ev.target === $('identity-modal')) closeIdentityModal();
+  });
+  $('identity-form')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const profName = statusData?.active_profile || 'default';
+    const payload = {
+      name: profName,
+      display_name: $('id-edit-display').value.trim(),
+      avatar_id: $('id-edit-avatar').value,
+    };
+    try {
+      await api('/api/accounts/update', { method: 'POST', body: JSON.stringify(payload) });
+      closeIdentityModal();
+      await Promise.all([refreshAll(), loadAccounts(false)]);
+      toast('已更新显示昵称与 3D 动物头像', 'ok');
+    } catch (e) { toast('保存失败: ' + e.message, 'err'); }
+  });
 
   const toggleWorkbenchLock = async (locked) => {
     try {
@@ -1342,17 +1445,20 @@
     if (!currentDetailName) return;
     const payload = {
       name: currentDetailName,
-      display_name: $('det-edit-display').value,
+      display_name: $('det-edit-display').value.trim(),
+      avatar_id: $('det-edit-avatar')?.value || '',
       note: $('det-edit-note').value,
       manual_plan: $('det-edit-plan').value,
       manual_registered_at: $('det-edit-reg').value,
       timezone: $('det-edit-tz').value,
       language: $('det-edit-lang').value,
     };
-    const updated = await api('/api/accounts/update', { method: 'POST', body: JSON.stringify(payload) });
-    renderAccountDetail(updated);
-    await loadAccounts(false);
-    toast('已保存账号信息');
+    try {
+      const updated = await api('/api/accounts/update', { method: 'POST', body: JSON.stringify(payload) });
+      renderAccountDetail(updated);
+      await Promise.all([refreshAll(), loadAccounts(false)]);
+      toast('已保存账号信息与头像', 'ok');
+    } catch (e) { toast('保存失败: ' + e.message, 'err'); }
   });
   $('det-btn-clean-dry').addEventListener('click', async () => {
     if (!currentDetailName) return;
@@ -1391,11 +1497,68 @@
     toast('已删除账号');
   });
 
+  async function runDoctorFix(payload) {
+    const res = await fetch('/api/doctor/fix', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+    if (data.doctor) renderDoctor(data.doctor);
+    await Promise.all([refreshAll(), loadAccounts(false)]);
+    const acts = data.actions || [];
+    const errs = data.errors || (data.error ? [data.error] : []);
+    if (errs.length > 0 && acts.length === 0) {
+      toast('修复未完成：' + errs.join('；'), 'err');
+      return;
+    }
+    if (errs.length > 0) {
+      toast(`${acts.join('；')}（部分仍需处理：${errs.join('；')}）`, 'warn');
+      return;
+    }
+    toast(acts.length > 0 ? acts.join('；') : '当前无需要自动修复的风险项', acts.length > 0 ? 'ok' : 'warn');
+  }
+
   // Security / Leaks / Captures
   $('btn-run-doctor').addEventListener('click', () => withBtnBusy($('btn-run-doctor'), '检测中…', async () => {
     await loadDoctor();
     toast('全量 11 项安全检测已完成', 'ok');
   }));
+  $('btn-fix-all-doctor')?.addEventListener('click', () => withBtnBusy($('btn-fix-all-doctor'), '修复中…', async () => {
+    await runDoctorFix({ fix_all: true });
+  }));
+  $('btn-install-pf-card')?.addEventListener('click', () => withBtnBusy($('btn-install-pf-card'), '等待授权…', async () => {
+    await runDoctorFix({ action: 'install_pf' });
+  }));
+  $('doctor-checks')?.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('button[data-doc-fix-id]');
+    if (!btn) return;
+    withBtnBusy(btn, '修复中…', async () => {
+      await runDoctorFix({ check_id: btn.dataset.docFixId, action: btn.dataset.docFixAct });
+    });
+  });
+  $('host-sockets-banner')?.addEventListener('click', async (ev) => {
+    const pacBtn = ev.target.closest('#btn-leak-enable-pac');
+    if (pacBtn) {
+      return withBtnBusy(pacBtn, '开启中…', async () => {
+        const res = await api('/api/browser-pac', { method: 'POST', body: JSON.stringify({ enabled: true }) });
+        const pac = res.status || res;
+        renderPACStatus(pac);
+        await refreshAll();
+        await loadLeaks();
+        toast(pac.matches_peaceclaude ? '已开启系统浏览器 PAC 接管' : (pac.note || 'PAC 开启未生效'), pac.matches_peaceclaude ? 'ok' : 'err');
+      });
+    }
+    const rescanBtn = ev.target.closest('#btn-leak-rescan');
+    if (rescanBtn) {
+      return withBtnBusy(rescanBtn, '扫描中…', async () => {
+        await Promise.all([loadLeaks(), refreshAll()]);
+        toast('已完成宿主机 Socket 重扫', 'ok');
+      });
+    }
+  });
   $('btn-pause-recheck').addEventListener('click', () => withBtnBusy($('btn-pause-recheck'), '重检中…', async () => {
     const res = await api('/api/pause-and-recheck', { method: 'POST', body: '{}' });
     if (res.doctor) renderDoctor(res.doctor);
@@ -1482,7 +1645,13 @@
     skip_probe_during_sse: $('cfg-skip-sse').checked,
     strip_host_anthropic_env: $('cfg-strip-host-env').checked,
     allow_corporate_direct: $('cfg-corp-direct').checked,
+    proxy_auth_domains: $('cfg-proxy-auth-domains') ? $('cfg-proxy-auth-domains').checked : false,
     vm_proxy_enabled: $('cfg-vm-proxy').checked,
+  });
+  $('cfg-proxy-auth-domains')?.addEventListener('change', () => {
+    saveConfigPayload(gatherAllSettings(), $('cfg-proxy-auth-domains').checked
+      ? '已启用登录辅助域经静态 IP 代理，PAC 已热更新'
+      : '已切换为严格仅 Claude 域名走静态 IP（Google 登录与其余网站直连）');
   });
   $('form-network').addEventListener('input', () => { populateSettings._dirty = true; });
   $('form-general').addEventListener('input', () => { populateSettings._dirty = true; });
@@ -1501,7 +1670,7 @@
     await refreshAll();
     if (want) {
       if (pac.matches_peaceclaude) {
-        toast('已为系统浏览器开启 PeaceClaude PAC（仅分流 Claude 与 Google 登录域名）', 'ok');
+        toast('已为系统浏览器开启 PeaceClaude PAC（仅 Claude 相关域名走静态 IP）', 'ok');
       } else {
         toast('开启 PAC 后检测未匹配：' + (pac.note || '请检查系统网络代理设置'), 'err');
       }
@@ -1561,97 +1730,12 @@
   $('select-ui-size').addEventListener('change', (ev) => { appearanceState.ui_font_size = Number(ev.target.value); saveAppearanceDebounced(); });
   $('select-code-size').addEventListener('change', (ev) => { appearanceState.code_font_size = Number(ev.target.value); saveAppearanceDebounced(); });
 
-  $('btn-save-theme-as').addEventListener('click', () => {
-    const name = $('input-save-theme-name').value.trim();
-    if (!name) { toast('请先输入方案名称'); return; }
-    const l = resolveEffectiveThemeColors('light'), d = resolveEffectiveThemeColors('dark');
-    const id = 'theme-' + Date.now();
-    const list = [...(appearanceState.saved_themes || [])];
-    list.push({
-      id, name,
-      theme_mode: appearanceState.theme_mode,
-      preset_light: l.presetKey, preset_dark: d.presetKey,
-      light: { accent: l.accent, bg: l.bg, text: l.text },
-      dark: { accent: d.accent, bg: d.bg, text: d.text },
-      ui_font: appearanceState.ui_font, code_font: appearanceState.code_font,
-    });
-    appearanceState.saved_themes = list;
-    appearanceState.active_saved_theme = id;
-    $('input-save-theme-name').value = '';
-    saveAppearanceDebounced();
-    toast('已保存方案: ' + name);
-  });
-  $('saved-theme-chips').addEventListener('click', (ev) => {
-    const delBtn = ev.target.closest('[data-del-saved]');
-    if (delBtn) {
-      const id = delBtn.dataset.delSaved;
-      appearanceState.saved_themes = (appearanceState.saved_themes || []).filter((x) => x.id !== id);
-      if (appearanceState.active_saved_theme === id) appearanceState.active_saved_theme = '';
-      saveAppearanceDebounced();
-      toast('已删除自定义方案');
-      return;
-    }
-    const chip = ev.target.closest('[data-apply-saved]');
-    if (!chip) return;
-    const id = chip.dataset.applySaved;
-    const item = (appearanceState.saved_themes || []).find((x) => x.id === id);
-    if (!item) return;
-    appearanceState.active_saved_theme = id;
-    if (item.theme_mode) appearanceState.theme_mode = item.theme_mode;
-    if (item.preset_light) appearanceState.preset_light = item.preset_light;
-    if (item.preset_dark) appearanceState.preset_dark = item.preset_dark;
-    appearanceState.custom_light = item.light || null;
-    appearanceState.custom_dark = item.dark || null;
-    appearanceState.ui_font = item.ui_font || '';
-    appearanceState.code_font = item.code_font || '';
-    editingSidePinned = false;
-    saveAppearanceDebounced();
-    toast('已应用方案: ' + item.name);
-  });
-  $('btn-theme-export').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify({ version: 1, name: 'PeaceClaude Theme', appearance: appearanceState }, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'peaceclaude-theme.json';
-    a.click();
-    toast('已导出主题配置 JSON');
-  });
-  $('btn-theme-import').addEventListener('click', () => $('input-theme-file').click());
-  $('input-theme-file').addEventListener('change', async (ev) => {
-    const f = ev.target.files?.[0];
-    ev.target.value = '';
-    if (!f) return;
-    try {
-      const parsed = JSON.parse(await f.text());
-      const src = parsed.appearance || parsed;
-      if (!src || typeof src !== 'object' || Array.isArray(src)) throw new Error('无效主题格式');
-      const isHex = (v) => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v.trim());
-      const sanitizeColorObj = (o) => {
-        if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
-        const out = {};
-        if (isHex(o.accent)) out.accent = o.accent.trim().toLowerCase();
-        if (isHex(o.bg)) out.bg = o.bg.trim().toLowerCase();
-        if (isHex(o.text)) out.text = o.text.trim().toLowerCase();
-        return Object.keys(out).length ? out : null;
-      };
-      const clean = { ...appearanceState };
-      if (['light', 'dark', 'system'].includes(src.theme_mode)) clean.theme_mode = src.theme_mode;
-      if (typeof src.preset_light === 'string') clean.preset_light = normalizePresetKey('light', src.preset_light);
-      if (typeof src.preset_dark === 'string') clean.preset_dark = normalizePresetKey('dark', src.preset_dark);
-      if (src.custom_light === null || typeof src.custom_light === 'object') clean.custom_light = sanitizeColorObj(src.custom_light);
-      if (src.custom_dark === null || typeof src.custom_dark === 'object') clean.custom_dark = sanitizeColorObj(src.custom_dark);
-      if (typeof src.ui_font === 'string') clean.ui_font = src.ui_font.slice(0, 160);
-      if (typeof src.code_font === 'string') clean.code_font = src.code_font.slice(0, 160);
-      if (typeof src.ui_font_size === 'number' && src.ui_font_size >= 11 && src.ui_font_size <= 20) clean.ui_font_size = Math.round(src.ui_font_size);
-      if (typeof src.code_font_size === 'number' && src.code_font_size >= 10 && src.code_font_size <= 18) clean.code_font_size = Math.round(src.code_font_size);
-      if (Array.isArray(src.saved_themes)) {
-        clean.saved_themes = src.saved_themes.filter((t) => t && typeof t === 'object' && typeof t.id === 'string' && typeof t.name === 'string').slice(0, 32);
-      }
-      appearanceState = clean;
-      saveAppearanceDebounced();
-      toast('已导入并应用主题', 'ok');
-    } catch (e) { toast('导入失败: ' + e.message, 'err'); }
-  });
+  $('btn-save-appearance')?.addEventListener('click', () => withBtnBusy($('btn-save-appearance'), '保存中…', async () => {
+    clearTimeout(saveAppTimer);
+    applyAppearance();
+    await api('/api/appearance/update', { method: 'POST', body: JSON.stringify(appearanceState) });
+    toast('已保存并应用当前主题配置', 'ok');
+  }));
 
   // Remote Pairing Events
   $('remote-mode-seg').addEventListener('click', async (ev) => {

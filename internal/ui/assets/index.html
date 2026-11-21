@@ -26,11 +26,7 @@
     <!-- Unified Single-Level Navigation Sidebar -->
     <aside class="sidebar">
       <div class="brand-head">
-        <svg class="brand-mark" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="2.5" y="2.5" width="19" height="19" rx="5" stroke="currentColor" stroke-width="1.5" />
-          <path d="M12 6.5 16.5 8.6v3.6c0 3-1.9 4.9-4.5 5.8-2.6-.9-4.5-2.8-4.5-5.8V8.6L12 6.5Z" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" />
-          <circle cx="12" cy="11.8" r="1.4" fill="var(--accent)" />
-        </svg>
+        <img class="brand-logo-img" src="/peace-logo.png" alt="PeaceClaude Logo" width="34" height="34" />
         <div class="brand-meta">
           <div class="brand-name">PeaceClaude</div>
           <div class="brand-ver mono" id="version-badge">0.1.0</div>
@@ -122,6 +118,11 @@
             </div>
 
             <div class="sheet-divider"></div>
+            <button class="sheet-action" id="pop-edit-identity" role="menuitem" type="button">
+              <span class="nav-ico" data-icon="users"></span>
+              <span class="sheet-act-main">昵称与 3D 头像</span>
+              <span class="sheet-act-meta">9 款可选</span>
+            </button>
             <button class="sheet-action" id="pop-lock-ui" role="menuitem" type="button">
               <span class="nav-ico" data-icon="lock"></span>
               <span class="sheet-act-main">锁定控制台</span>
@@ -190,7 +191,7 @@
         <div class="inline-notice hidden" id="account-pac-warn">
           <div class="inline-notice-text">
             <span class="nav-ico" data-icon="alert-triangle"></span>
-            <span>系统浏览器尚未开启 PeaceClaude PAC：只分流普通浏览器里的 Claude 与 Google/hCaptcha 登录域名（日常搜索和内网仍直连）；若用 Desktop 点 Google 登录被 403 拦截，点右侧一键开启即可</span>
+            <span>系统浏览器尚未开启 PeaceClaude PAC（仅分流 Claude 域名，Google 登录与日常网页仍走正常直连）；若用 Desktop/普通浏览器登录报地区或网络错误，点右侧一键开启即可</span>
           </div>
           <button class="btn btn-secondary btn-sm" id="btn-enable-pac-inline" type="button">开启浏览器 PAC</button>
         </div>
@@ -233,11 +234,12 @@
         <div class="page-head">
           <div>
             <h1>安全检测与分诊</h1>
-            <p class="muted">核验出口约束、DNS、时区语言、Fail-Closed 门禁、UDP/IPv6 与静态 IP 一致性</p>
+            <p class="muted">核验出口约束、DNS、时区语言、Fail-Closed 门禁、UDP/IPv6 与静态 IP 一致性，每项风险均支持直接一键修复</p>
           </div>
           <div class="btn-row">
             <button class="btn btn-ghost btn-sm" id="btn-copy-report" type="button">复制报告</button>
             <button class="btn btn-secondary btn-sm" id="btn-pause-recheck" type="button">暂停并重检</button>
+            <button class="btn btn-accent btn-sm" id="btn-fix-all-doctor" type="button">一键修复全部</button>
             <button class="btn btn-primary btn-sm" id="btn-run-doctor" type="button">运行全部 11 项检测</button>
           </div>
         </div>
@@ -324,13 +326,14 @@
             <div class="card">
               <div class="card-head">
                 <div>
-                  <h2>macOS 内核 pf 护盾与 VM 代理</h2>
+                  <h2>一键授权安装内核 pf 护盾</h2>
                   <p class="muted">封死宿主机及 VM 直连 Anthropic CIDR</p>
                 </div>
+                <button class="btn btn-secondary btn-sm" id="btn-install-pf-card" type="button">授权安装 pf</button>
               </div>
               <div id="vmproxy-box" class="kv-list"></div>
               <div class="section-sep">
-                <div class="small-label">激活内核级防直连（终端执行）</div>
+                <div class="small-label">也可复制终端执行（与上方一键授权等效）</div>
                 <pre class="code-box" id="pf-install-cmd">sudo bash ~/.peaceclaude/state/pf/install-pf.sh</pre>
               </div>
             </div>
@@ -398,22 +401,25 @@
         </div>
       </section>
 
-      <!-- TAB 5: Appearance Studio (Original 7:5 Live Instrument Stage + Palette Inspector) -->
+      <!-- TAB 5: Appearance Studio (Simplified 6 Presets + Custom Foreground/Surface Colors) -->
       <section class="tab-panel" id="tab-appearance">
         <div class="page-head">
           <div>
             <h1>外观工坊</h1>
-            <p class="muted">更改即时写入本机并生效，无需重启工作台</p>
+            <p class="muted">选择浅色 / 深色各 6 款主题或微调前景色与主色，保存后即时全站生效</p>
           </div>
-          <div class="segmented" id="app-theme-mode-seg" role="group">
-            <button type="button" data-mode="light"><span class="nav-ico" data-icon="sun"></span><span>浅色</span></button>
-            <button type="button" data-mode="dark"><span class="nav-ico" data-icon="moon"></span><span>深色</span></button>
-            <button type="button" data-mode="system"><span class="nav-ico" data-icon="monitor"></span><span>跟随系统</span></button>
+          <div class="btn-row">
+            <div class="segmented" id="app-theme-mode-seg" role="group">
+              <button type="button" data-mode="light"><span class="nav-ico" data-icon="sun"></span><span>浅色</span></button>
+              <button type="button" data-mode="dark"><span class="nav-ico" data-icon="moon"></span><span>深色</span></button>
+              <button type="button" data-mode="system"><span class="nav-ico" data-icon="monitor"></span><span>跟随系统</span></button>
+            </div>
+            <button class="btn btn-primary btn-sm" id="btn-save-appearance" type="button">保存主题设置</button>
           </div>
         </div>
 
-        <div class="grid-asym-7-5">
-          <!-- Left Stage: Real Miniature PeaceClaude Instrument Canvas -->
+        <div class="grid-asym-7-5 appearance-layout">
+          <!-- Left Stage: Real Miniature PeaceClaude Instrument Canvas + 6 Presets -->
           <div class="stack">
             <div class="card studio-stage-card">
               <div class="stage-toolbar">
@@ -427,7 +433,7 @@
                 </div>
               </div>
 
-              <!-- Moment: Faithful Live Miniature of PeaceClaude UI -->
+              <!-- Faithful Live Miniature of PeaceClaude UI -->
               <div class="live-theme-stage" id="live-theme-stage">
                 <div class="stage-mini-sidebar" id="stage-mini-sidebar">
                   <div class="stage-brand">
@@ -466,69 +472,44 @@
             <div class="card">
               <div class="card-head">
                 <div>
-                  <h2>已保存方案快照</h2>
-                  <p class="muted">将浅色与深色两套配色和字体组合存为独立快照或导出 JSON</p>
+                  <h2>预设主题色板（6 套）</h2>
+                  <p class="muted" id="inspector-side-desc">点击色板立即应用至当前模式</p>
                 </div>
-                <div class="btn-row">
-                  <button class="btn btn-secondary btn-sm" id="btn-theme-import" type="button">
-                    <span class="nav-ico" data-icon="upload"></span>
-                    <span>导入 JSON</span>
-                  </button>
-                  <button class="btn btn-secondary btn-sm" id="btn-theme-export" type="button">
-                    <span class="nav-ico" data-icon="download"></span>
-                    <span>导出 JSON</span>
-                  </button>
-                  <input type="file" id="input-theme-file" accept=".json,application/json" class="hidden" />
-                </div>
+                <button class="btn btn-ghost btn-sm" id="btn-reset-side" type="button">恢复默认预设</button>
               </div>
-              <div class="save-snapshot-row">
-                <input type="text" id="input-save-theme-name" placeholder="输入方案名称，例如 夜间值班" />
-                <button class="btn btn-secondary btn-sm" id="btn-save-theme-as" type="button">保存当前为方案</button>
-              </div>
-              <div class="saved-chips" id="saved-theme-chips"></div>
+              <div class="swatch-grid" id="preset-swatch-grid"></div>
             </div>
           </div>
 
-          <!-- Right Inspector: Swatch Grid + Primary Color Tuning + Typography -->
+          <!-- Right Inspector: Custom Foreground / Surface / Font -->
           <div class="stack">
             <div class="card">
               <div class="card-head">
                 <div>
-                  <h2>原创主题色板</h2>
-                  <p class="muted" id="inspector-side-desc">点击色板立即应用至深色方案</p>
-                </div>
-                <button class="btn btn-ghost btn-sm" id="btn-reset-side" type="button">恢复色板默认</button>
-              </div>
-              <div class="swatch-grid" id="preset-swatch-grid"></div>
-            </div>
-
-            <div class="card">
-              <div class="card-head">
-                <div>
-                  <h2>三原色微调</h2>
+                  <h2>自定义前景色与画布调色</h2>
                   <p class="muted" id="side-custom-label">当前为预设色值</p>
                 </div>
               </div>
               <div class="color-fields">
                 <div class="color-field-row">
-                  <span>强调信号色</span>
+                  <span>主题强调色 / 前景主调</span>
                   <div class="color-inputs">
                     <input type="color" id="pick-side-accent" />
                     <input type="text" id="hex-side-accent" maxlength="7" spellcheck="false" />
                   </div>
                 </div>
                 <div class="color-field-row">
-                  <span>画布底色</span>
-                  <div class="color-inputs">
-                    <input type="color" id="pick-side-bg" />
-                    <input type="text" id="hex-side-bg" maxlength="7" spellcheck="false" />
-                  </div>
-                </div>
-                <div class="color-field-row">
-                  <span>主文字墨色</span>
+                  <span>主文字前景色</span>
                   <div class="color-inputs">
                     <input type="color" id="pick-side-text" />
                     <input type="text" id="hex-side-text" maxlength="7" spellcheck="false" />
+                  </div>
+                </div>
+                <div class="color-field-row">
+                  <span>工作台底色</span>
+                  <div class="color-inputs">
+                    <input type="color" id="pick-side-bg" />
+                    <input type="text" id="hex-side-bg" maxlength="7" spellcheck="false" />
                   </div>
                 </div>
               </div>
@@ -598,9 +579,9 @@
           </div>
         </div>
 
-        <div class="grid-asym-7-5">
+        <div class="remote-pair-grid">
           <!-- Left: Topology & Device Authorization -->
-          <div class="stack">
+          <div class="stack remote-left-col">
             <div class="card">
               <div class="card-head">
                 <div>
@@ -780,14 +761,30 @@
 
               <div class="section-sep pac-row">
                 <div>
-                  <div class="check-title">普通浏览器分流 PAC 接管（Chrome / Safari / Arc / Edge）</div>
-                  <p class="muted" id="pac-status-desc">开启后仅让普通浏览器在访问 Claude 与 Google/hCaptcha 登录链路时自动走 PeaceClaude 静态出口，其他日常网站与内网直连；默认不自动改写系统网络，按需一键开关。</p>
+                  <div class="check-title">普通浏览器分流 PAC 接管（启动自动开启）</div>
+                  <p class="muted" id="pac-status-desc">启动守护进程默认自动接管：严格仅分流 Claude 相关域名（claude.ai / claude.com / anthropic.com / claudeusercontent.com）与 Anthropic 官方 IP 段；Google 登录与其他一切网站走本机正常直连。</p>
                 </div>
                 <div class="btn-row">
                   <span class="status-tag" id="pac-status-tag">--</span>
-                  <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-pac">开启浏览器 PAC</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-pac">关闭浏览器 PAC</button>
                 </div>
               </div>
+
+              <div class="pac-split-box">
+                <div class="pac-split-col">
+                  <strong>走静态 IP 代理（默认严格仅 Claude 相关）</strong>
+                  <p class="muted">claude.ai · claude.com · anthropic.com · claudeusercontent.com · Anthropic 官方 IP 段 · Claude 专属遥测屏蔽</p>
+                </div>
+                <div class="pac-split-col">
+                  <strong>保持本机正常网络直连 (DIRECT)</strong>
+                  <p class="muted">Google 登录 (accounts.google.com) · www.google.com · Chrome 更新与安全浏览 · Apple/Cloudflare · GitHub · 国内/外日常网页与内网</p>
+                </div>
+              </div>
+
+              <label class="switch-label" style="margin-top:12px; color:var(--text);">
+                <input type="checkbox" id="cfg-proxy-auth-domains" />
+                <span>同时经静态 IP 代理 Google / Apple / Cloudflare 登录域（默认关闭，仅当您本机直连打不开 Google 登录页时勾选）</span>
+              </label>
             </div>
 
             <div class="card">
@@ -947,8 +944,13 @@
 
       <form id="det-edit-form" class="subcard" style="margin-top:12px;">
         <div class="subcard-head">
-          <h3>编辑备注与手动补充信息</h3>
+          <h3>编辑昵称、3D 动物头像与备注</h3>
           <button type="submit" class="btn btn-primary btn-sm">保存账号信息</button>
+        </div>
+        <div class="field" style="margin-bottom:12px;">
+          <label>选择 3D 动物头像（点击切换）</label>
+          <input type="hidden" id="det-edit-avatar" value="" />
+          <div class="avatar-picker-grid" id="det-avatar-picker"></div>
         </div>
         <div class="settings-grid">
           <div class="field">
@@ -1052,6 +1054,34 @@
         <div class="btn-row" style="justify-content:flex-end;">
           <button type="button" class="btn btn-ghost btn-sm" id="create-btn-cancel">取消</button>
           <button type="submit" class="btn btn-primary btn-sm">创建隔离账号</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 身份昵称与 3D 动物头像设置弹窗（左下角用户弹窗触发） -->
+  <div id="identity-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="id-modal-title">
+    <div class="modal-panel modal-panel-sm card">
+      <div class="modal-head">
+        <div>
+          <h2 id="id-modal-title">设置显示昵称与 3D 动物头像</h2>
+          <p class="muted" id="id-modal-sub">应用于当前活跃隔离档案与左下角身份标识</p>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="id-modal-close">关闭</button>
+      </div>
+      <form id="identity-form" class="stack" style="gap:12px;">
+        <div class="field">
+          <label>屏幕显示昵称</label>
+          <input type="text" id="id-edit-display" placeholder="如 工作主力 / 研发专用" />
+        </div>
+        <div class="field">
+          <label>选择 3D 动物头像（9 款预设）</label>
+          <input type="hidden" id="id-edit-avatar" value="" />
+          <div class="avatar-picker-grid" id="id-avatar-picker"></div>
+        </div>
+        <div class="btn-row" style="justify-content:flex-end;">
+          <button type="button" class="btn btn-ghost btn-sm" id="id-btn-cancel">取消</button>
+          <button type="submit" class="btn btn-primary btn-sm">保存身份设置</button>
         </div>
       </form>
     </div>

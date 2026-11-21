@@ -39,10 +39,14 @@ type Dialer struct {
 	Timeout     time.Duration
 	MaxWarmIdle int
 
-	poolMu    sync.Mutex
-	warmPool  []warmConn
-	poolEpoch uint64
-	refilling atomic.Int32
+	poolMu        sync.Mutex
+	warmPool      []warmConn
+	poolEpoch     uint64
+	refilling     atomic.Int32
+	socks5Capable atomic.Int32 // 0=unknown, 1=supported, -1=unsupported
+
+	protoMu     sync.RWMutex
+	socks5Hosts map[string]bool
 }
 
 func FromConfig(cfg config.UpstreamConfig) *Dialer {
@@ -82,6 +86,97 @@ func (d *Dialer) RedactedString() string {
 	return fmt.Sprintf("%s://%s%s", d.Mode, d.Address, auth)
 }
 
+func targetHostKey(targetAddr string) string {
+	host, _, err := net.SplitHostPort(targetAddr)
+	if err != nil {
+		host = targetAddr
+	}
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(host)), ".")
+}
+
+func (d *Dialer) isSOCKS5Preferred(host string) bool {
+	if host == "" {
+		return false
+	}
+	d.protoMu.RLock()
+	ok := d.socks5Hosts != nil && d.socks5Hosts[host]
+	d.protoMu.RUnlock()
+	return ok
+}
+
+func (d *Dialer) markSOCKS5Preferred(host string, yes bool) {
+	if host == "" {
+		return
+	}
+	d.protoMu.Lock()
+	if yes {
+		if d.socks5Hosts == nil {
+			d.socks5Hosts = make(map[string]bool)
+		}
+		d.socks5Hosts[host] = true
+	} else if d.socks5Hosts != nil {
+		delete(d.socks5Hosts, host)
+	}
+	d.protoMu.Unlock()
+}
+
+func isHTTPTunnelResetError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "rejected connect") {
+		return false
+	}
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "eof") ||
+		strings.Contains(msg, "broken pipe")
+}
+
+func isGoogleAuthDomain(host string) bool {
+	for _, dom := range []string{"google.com", "googleapis.com", "gstatic.com", "googleusercontent.com"} {
+		if host == dom || strings.HasSuffix(host, "."+dom) {
+			return true
+		}
+	}
+	return false
+}
+
+// ProbeSOCKS5Support checks once whether a direct-http dual-protocol upstream also speaks SOCKS5
+// so Google OAuth hosts can bypass plaintext HTTP CONNECT DPI from the very first request.
+func (d *Dialer) ProbeSOCKS5Support(ctx context.Context) bool {
+	if d == nil || d.Mode != "direct-http" || strings.TrimSpace(d.Address) == "" {
+		return false
+	}
+	if cur := d.socks5Capable.Load(); cur != 0 {
+		return cur == 1
+	}
+	pctx, cancel := context.WithTimeout(ctx, 2200*time.Millisecond)
+	defer cancel()
+	nd := &net.Dialer{Timeout: 2200 * time.Millisecond}
+	c, err := nd.DialContext(pctx, "tcp", d.Address)
+	if err != nil {
+		return false
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(1500 * time.Millisecond))
+	greeting := []byte{0x05, 0x01, 0x00}
+	if d.Username != "" || d.Password != "" {
+		greeting = []byte{0x05, 0x02, 0x00, 0x02}
+	}
+	if _, err := c.Write(greeting); err != nil {
+		d.socks5Capable.Store(-1)
+		return false
+	}
+	var resp [2]byte
+	if _, err := io.ReadFull(c, resp[:]); err != nil || resp[0] != 0x05 || resp[1] == 0xFF {
+		d.socks5Capable.Store(-1)
+		return false
+	}
+	d.socks5Capable.Store(1)
+	return true
+}
+
 // DialContext connects to targetAddr ("host:port") strictly via the upstream proxy.
 // Hostnames are always sent verbatim to the upstream so DNS resolves remotely.
 func (d *Dialer) DialContext(ctx context.Context, network, targetAddr string) (net.Conn, error) {
@@ -94,7 +189,33 @@ func (d *Dialer) DialContext(ctx context.Context, network, targetAddr string) (n
 	switch d.Mode {
 	case "direct-socks5":
 		return d.dialSOCKS5(ctx, targetAddr)
-	case "direct-http", "local-proxy":
+	case "direct-http":
+		host := targetHostKey(targetAddr)
+		preferSOCKS := d.isSOCKS5Preferred(host) || (d.socks5Capable.Load() == 1 && isGoogleAuthDomain(host))
+		if preferSOCKS {
+			conn, err := d.dialSOCKS5(ctx, targetAddr)
+			if err == nil {
+				return conn, nil
+			}
+			d.markSOCKS5Preferred(host, false)
+			if ctx.Err() == nil {
+				return d.dialHTTPConnect(ctx, targetAddr)
+			}
+			return nil, err
+		}
+		conn, err := d.dialHTTPConnect(ctx, targetAddr)
+		if err == nil {
+			return conn, nil
+		}
+		if ctx.Err() == nil && isHTTPTunnelResetError(err) && d.socks5Capable.Load() != -1 {
+			if sc, serr := d.dialSOCKS5(ctx, targetAddr); serr == nil {
+				d.socks5Capable.CompareAndSwap(0, 1)
+				d.markSOCKS5Preferred(host, true)
+				return sc, nil
+			}
+		}
+		return nil, err
+	case "local-proxy":
 		return d.dialHTTPConnect(ctx, targetAddr)
 	default:
 		return nil, fmt.Errorf("unsupported upstream mode %q", d.Mode)
@@ -179,6 +300,9 @@ func (d *Dialer) DrainPool() {
 	conns := d.warmPool
 	d.warmPool = nil
 	d.poolMu.Unlock()
+	d.protoMu.Lock()
+	d.socks5Hosts = nil
+	d.protoMu.Unlock()
 	for _, wc := range conns {
 		_ = wc.conn.Close()
 	}
@@ -371,22 +495,33 @@ func (d *Dialer) dialSOCKS5(ctx context.Context, targetAddr string) (net.Conn, e
 	if err != nil {
 		return nil, err
 	}
-	tun, retryable, err := d.trySOCKS5Handshake(conn, host, portNum, targetAddr)
+	tun, retryable, err := d.trySOCKS5Handshake(ctx, conn, host, portNum, targetAddr)
 	if err == nil {
 		return tun, nil
 	}
-	if fromPool && retryable && ctx.Err() == nil {
+	if fromPool && retryable && ctx.Err() == nil && d.socks5Capable.Load() != -1 {
 		freshConn, ferr := d.dialRawProxyFresh(ctx)
 		if ferr != nil {
 			return nil, ferr
 		}
-		tun2, _, err2 := d.trySOCKS5Handshake(freshConn, host, portNum, targetAddr)
+		tun2, _, err2 := d.trySOCKS5Handshake(ctx, freshConn, host, portNum, targetAddr)
 		return tun2, err2
 	}
 	return nil, err
 }
 
-func (d *Dialer) trySOCKS5Handshake(conn net.Conn, host string, portNum int, targetAddr string) (net.Conn, bool, error) {
+func (d *Dialer) trySOCKS5Handshake(ctx context.Context, conn net.Conn, host string, portNum int, targetAddr string) (net.Conn, bool, error) {
+	// Cap initial method-selection read when SOCKS5 capability is unprobed so an
+	// HTTP-only proxy waiting on \r\n\r\n fails fast instead of hanging the whole timeout.
+	probingGreeting := d.socks5Capable.Load() == 0 && d.Mode == "direct-http"
+	if probingGreeting {
+		shortDL := time.Now().Add(600 * time.Millisecond)
+		if ctxDL, ok := ctx.Deadline(); ok && ctxDL.Before(shortDL) {
+			shortDL = ctxDL
+		}
+		_ = conn.SetDeadline(shortDL)
+	}
+
 	// 1. Greeting
 	useAuth := d.Username != "" || d.Password != ""
 	var greeting []byte
@@ -402,11 +537,21 @@ func (d *Dialer) trySOCKS5Handshake(conn net.Conn, host string, portNum int, tar
 	var methodResp [2]byte
 	if _, err := io.ReadFull(conn, methodResp[:]); err != nil {
 		_ = conn.Close()
+		if probingGreeting && ctx.Err() == nil {
+			d.socks5Capable.CompareAndSwap(0, -1)
+		}
 		return nil, true, fmt.Errorf("socks5 greeting read: %w", err)
 	}
 	if methodResp[0] != 0x05 {
 		_ = conn.Close()
+		if probingGreeting {
+			d.socks5Capable.CompareAndSwap(0, -1)
+		}
 		return nil, false, fmt.Errorf("socks5 invalid version 0x%02x", methodResp[0])
+	}
+	if probingGreeting {
+		d.socks5Capable.CompareAndSwap(0, 1)
+		d.applyConnDeadline(ctx, conn)
 	}
 	switch methodResp[1] {
 	case 0x00:
@@ -471,13 +616,13 @@ func (d *Dialer) trySOCKS5Handshake(conn net.Conn, host string, portNum int, tar
 
 	if _, err := conn.Write(req); err != nil {
 		_ = conn.Close()
-		return nil, false, fmt.Errorf("socks5 connect write: %w", err)
+		return nil, true, fmt.Errorf("socks5 connect write: %w", err)
 	}
 
 	var hdr [4]byte
 	if _, err := io.ReadFull(conn, hdr[:]); err != nil {
 		_ = conn.Close()
-		return nil, false, fmt.Errorf("socks5 connect reply header: %w", err)
+		return nil, true, fmt.Errorf("socks5 connect reply header: %w", err)
 	}
 	if hdr[0] != 0x05 {
 		_ = conn.Close()

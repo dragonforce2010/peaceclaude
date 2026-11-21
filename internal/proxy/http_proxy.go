@@ -64,13 +64,15 @@ func (g *Gateway) UpdateConfig(cfg *config.Config) {
 	oldBackup.DrainPool()
 }
 
-// WarmUpstream pre-warms TCP connections to the active remote upstream proxy.
+// WarmUpstream pre-warms TCP connections to the active remote upstream proxy
+// and checks once whether direct-http supports dual-protocol SOCKS5 bypass for OAuth domains.
 func (g *Gateway) WarmUpstream(ctx context.Context) {
 	g.mu.RLock()
 	d := g.dialer
 	g.mu.RUnlock()
 	if d != nil {
 		d.WarmPool(ctx, 2)
+		go d.ProbeSOCKS5Support(context.Background())
 	}
 }
 
@@ -217,9 +219,11 @@ func dialWithRetry(ctx context.Context, primary, backup *upstream.Dialer, target
 	}
 
 	firstBudget := remaining
-	if remaining > 6*time.Second {
-		// Fail fast on cross-ocean TCP SYN packet loss instead of burning the full 12s+ budget.
+	if backup != nil && remaining > 6*time.Second {
 		firstBudget = 4500 * time.Millisecond
+	} else if backup == nil && remaining > 8500*time.Millisecond {
+		// Allow slightly wider budget when there is no backup upstream (e.g., cross-Pacific SOCKS5 OAuth).
+		firstBudget = 7500 * time.Millisecond
 	} else if backup != nil && remaining > 2*time.Second {
 		firstBudget = remaining / 2
 	}

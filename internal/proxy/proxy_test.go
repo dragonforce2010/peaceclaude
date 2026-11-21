@@ -185,25 +185,67 @@ func TestGatewayFailClosedTelemetryAndSOCKS5(t *testing.T) {
 }
 
 func TestRenderPACCoversGoogleOAuthAndKeepsWWWGoogleDirect(t *testing.T) {
-	cfg := config.Default()
-	pac := RenderPAC(cfg, "claude")
+	// Default strict Claude-only mode: ONLY Claude/Anthropic domains + CIDRs go to PROXY;
+	// Google login, www.google.com, Cloudflare Turnstile, Apple etc. MUST return DIRECT.
+	cfgDefault := config.Default()
+	pacDefault := RenderPAC(cfgDefault, "claude")
+	for _, want := range []string{
+		"anthropic.com",
+		"claude.ai",
+		"claude.com",
+		"claudeusercontent.com",
+		"160.79.104.0",
+		"return \"DIRECT\";",
+	} {
+		if !strings.Contains(pacDefault, want) {
+			t.Fatalf("default PAC missing %q", want)
+		}
+	}
+	for _, mustStayDirect := range []string{
+		"accounts.google.com",
+		"oauth2.googleapis.com",
+		"www.googleapis.com",
+		"challenges.cloudflare.com",
+		"appleid.apple.com",
+		`"www.google.com"`,
+		`".google.com"`,
+		`".sentry.io"`,
+	} {
+		if strings.Contains(pacDefault, mustStayDirect) {
+			t.Fatalf("default strict Claude-only PAC must NOT match %s:\n%s", mustStayDirect, pacDefault)
+		}
+	}
+
+	// Opt-in ProxyAuthDomains=true: Google OAuth & verification assets routed, while www.google.com/sentry.io stay DIRECT.
+	cfgAuth := config.Default()
+	cfgAuth.Shield.ProxyAuthDomains = true
+	pacAuth := RenderPAC(cfgAuth, "claude")
 	for _, want := range []string{
 		"accounts.google.com",
+		"oauth2.googleapis.com",
 		"apis.google.com",
-		"gstatic.com",
-		"googleapis.com",
-		"googleusercontent.com",
+		"fonts.gstatic.com",
+		"lh3.googleusercontent.com",
 		"hcaptcha.com",
 		"challenges.cloudflare.com",
 		"stripe.network",
 		"return \"DIRECT\";",
 	} {
-		if !strings.Contains(pac, want) {
-			t.Fatalf("PAC missing %q", want)
+		if !strings.Contains(pacAuth, want) {
+			t.Fatalf("ProxyAuthDomains PAC missing %q", want)
 		}
 	}
-	if strings.Contains(pac, "www.google.com") || strings.Contains(pac, `".google.com"`) {
-		t.Fatalf("PAC must NOT force general google.com traffic through Claude proxy:\n%s", pac)
+	for _, mustNotWildcard := range []string{
+		`"www.google.com"`,
+		`".google.com"`,
+		`".googleapis.com"`,
+		`".gstatic.com"`,
+		`".googleusercontent.com"`,
+		`".sentry.io"`,
+	} {
+		if strings.Contains(pacAuth, mustNotWildcard) {
+			t.Fatalf("PAC must NOT wildcard %s so non-Claude websites stay DIRECT:\n%s", mustNotWildcard, pacAuth)
+		}
 	}
 }
 
@@ -304,7 +346,7 @@ func TestGatewayConnectRetriesTransientUpstreamFailureAndBackupFailover(t *testi
 	cfgBackup.Egress.ExpectedIP = "198.51.100.10"
 	gw.UpdateConfig(cfgBackup)
 
-	resp2, err := client.Get("http://accounts.google.com/")
+	resp2, err := client.Get("http://claude.ai/")
 	if err != nil {
 		t.Fatalf("expected failover to backup upstream, got err: %v", err)
 	}

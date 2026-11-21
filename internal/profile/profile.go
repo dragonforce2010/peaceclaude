@@ -48,6 +48,7 @@ type AccountIdentity struct {
 
 type MetaPatch struct {
 	DisplayName        *string `json:"display_name"`
+	AvatarID           *string `json:"avatar_id"`
 	Note               *string `json:"note"`
 	ManualPlan         *string `json:"manual_plan"`
 	ManualRegisteredAt *string `json:"manual_registered_at"`
@@ -59,6 +60,7 @@ type MetaPatch struct {
 type Profile struct {
 	Name               string          `json:"name"`
 	DisplayName        string          `json:"display_name,omitempty"`
+	AvatarID           string          `json:"avatar_id,omitempty"`
 	Note               string          `json:"note,omitempty"`
 	ExpectedIP         string          `json:"expected_ip,omitempty"`
 	Timezone           string          `json:"timezone,omitempty"`
@@ -98,6 +100,19 @@ type CleanReport struct {
 	Preserved  []string `json:"preserved"`
 	NewDevice  string   `json:"new_device_uuid"`
 	Notes      []string `json:"notes,omitempty"`
+}
+
+var PresetAvatarIDs = []string{
+	"tiger", "lion", "eagle", "fox", "panda", "shiba", "owl", "koala", "wolf",
+}
+
+func IsPresetAvatarID(id string) bool {
+	for _, v := range PresetAvatarIDs {
+		if v == id {
+			return true
+		}
+	}
+	return false
 }
 
 func ValidateName(name string) error {
@@ -295,6 +310,13 @@ func UpdateMeta(cfg *config.Config, name string, patch MetaPatch) (*Profile, err
 	}
 	if patch.DisplayName != nil {
 		p.DisplayName = strings.TrimSpace(*patch.DisplayName)
+	}
+	if patch.AvatarID != nil {
+		av := strings.ToLower(strings.TrimSpace(*patch.AvatarID))
+		if av != "" && !IsPresetAvatarID(av) {
+			return nil, fmt.Errorf("无效的预设头像 %q", av)
+		}
+		p.AvatarID = av
 	}
 	if patch.Note != nil {
 		p.Note = strings.TrimSpace(*patch.Note)

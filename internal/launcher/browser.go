@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -73,6 +74,8 @@ func LaunchLoginBrowserWithPID(ctx context.Context, cfg *config.Config, selfBin,
 		lang = "en-US"
 	}
 
+	_ = ensureBrowserDNSPrivacyPrefs(prof.BrowserDir)
+
 	args := []string{
 		"--user-data-dir=" + prof.BrowserDir,
 		"--proxy-server=" + cfg.HTTPProxyURL(),
@@ -82,11 +85,8 @@ func LaunchLoginBrowserWithPID(ctx context.Context, cfg *config.Config, selfBin,
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 		"--no-first-run",
 		"--no-default-browser-check",
+		targetURL,
 	}
-	if cfg.Identity.BlockDesktopLocalDNS {
-		args = append(args, "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1, EXCLUDE localhost")
-	}
-	args = append(args, targetURL)
 
 	if dryRun {
 		return browserBin, 0, args, nil
@@ -168,4 +168,29 @@ func findRunningBrowserPID(userDataDir string) int {
 		}
 	}
 	return 0
+}
+
+func ensureBrowserDNSPrivacyPrefs(browserDir string) error {
+	if strings.TrimSpace(browserDir) == "" {
+		return nil
+	}
+	defDir := filepath.Join(browserDir, "Default")
+	if err := os.MkdirAll(defDir, 0o700); err != nil {
+		return err
+	}
+	prefsPath := filepath.Join(defDir, "Preferences")
+	prefs := map[string]any{}
+	if raw, err := os.ReadFile(prefsPath); err == nil && len(strings.TrimSpace(string(raw))) > 0 {
+		if uerr := json.Unmarshal(raw, &prefs); uerr != nil {
+			// Avoid corrupting existing user preferences if file is partial/locked.
+			return nil
+		}
+	}
+	prefs["dns_prefetching"] = map[string]any{"enabled": false}
+	prefs["async_dns"] = map[string]any{"enabled": false}
+	out, err := json.Marshal(prefs)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(prefsPath, out, 0o600)
 }

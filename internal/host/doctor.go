@@ -22,13 +22,16 @@ import (
 )
 
 type CheckItem struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Status   string `json:"status"` // pass | warn | fail
-	Detail   string `json:"detail"`
-	FixHint  string `json:"fix_hint,omitempty"`
-	Weight   int    `json:"weight"`
-	Critical bool   `json:"critical"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"` // pass | warn | fail
+	Detail    string `json:"detail"`
+	FixHint   string `json:"fix_hint,omitempty"`
+	Fixable   bool   `json:"fixable,omitempty"`
+	FixLabel  string `json:"fix_label,omitempty"`
+	FixAction string `json:"fix_action,omitempty"`
+	Weight    int    `json:"weight"`
+	Critical  bool   `json:"critical"`
 }
 
 type DesktopProcAudit struct {
@@ -241,13 +244,17 @@ func RunDoctor(ctx context.Context, cfg *config.Config, daemonRunning bool, gate
 
 	var checks []CheckItem
 	add := func(id, title, status, detail, fix string, weight int, critical bool) {
-		checks = append(checks, CheckItem{
+		item := CheckItem{
 			ID: id, Title: title, Status: status, Detail: detail, FixHint: fix, Weight: weight, Critical: critical,
-		})
+		}
+		if status != "pass" {
+			item.Fixable, item.FixLabel, item.FixAction = fixMetadataForCheck(id, status, detail)
+		}
+		checks = append(checks, item)
 	}
 
 	// =========================================================================
-	// 11 Core Isolation & Network Checks (aligned with Claude-Cage 11/11 matrix)
+	// 11 Core Isolation & Network Security Checks
 	// =========================================================================
 
 	// 1. 环境外出站约束 (Outbound Constraint: pf + lsof + active direct IPv4 dial test)
@@ -259,19 +266,19 @@ func RunDoctor(ctx context.Context, cfg *config.Config, daemonRunning bool, gate
 		}
 		add("outbound_constraint", "1. 环境外出站约束", "fail",
 			"发现宿主机直连 Anthropic Socket: "+strings.Join(items, ", "),
-			"关闭未隔离进程并启用 pf killswitch", 10, true)
+			"开启浏览器 PAC 并安装 pf 内核防直连规则", 10, true)
 	} else if (vmProxy.PeacePFAnchorExists || vmProxy.LegacyPFAnchorExists) && directBlocked {
 		add("outbound_constraint", "1. 环境外出站约束", "pass",
 			fmt.Sprintf("宿主机无直连泄漏，且实测直连 160.79.104.10:443 已被 pf 阻断 (%s)", directErr),
 			"", 10, true)
 	} else if vmProxy.PeacePFAnchorExists || vmProxy.LegacyPFAnchorExists {
 		add("outbound_constraint", "1. 环境外出站约束", "warn",
-			"已存在 pf anchor，但主动直连探测未超时拦截 ("+directErr+")，请核对 pf 规则是否生效",
-			"执行 `peaceclaude vm-proxy status` 核验 pf 规则", 10, true)
+			"已存在 pf anchor，但主动直连探测未超时拦截 ("+directErr+")，需加载生效规则",
+			"点击一键授权安装/加载 PeaceClaude pf 规则", 10, true)
 	} else {
 		add("outbound_constraint", "1. 环境外出站约束", "warn",
 			"进程级出站受控（无直连 socket），但尚未安装内核级 pf killswitch 兜底",
-			fmt.Sprintf("执行 `sudo bash %s` 启用内核防直连", vmProxy.InstallScriptPath), 10, true)
+			fmt.Sprintf("点击一键授权安装或执行 `sudo bash %s`", vmProxy.InstallScriptPath), 10, true)
 	}
 
 	// 2. 终端检测通道 (Terminal Proxy Channel: live HTTP :18897 + SOCKS5 :18898 check)
@@ -285,25 +292,23 @@ func RunDoctor(ctx context.Context, cfg *config.Config, daemonRunning bool, gate
 			add("terminal_channel", "2. 终端检测通道", "pass", termDetail, "", 10, true)
 		} else {
 			add("terminal_channel", "2. 终端检测通道", "fail", termDetail,
-				"检查 `peaceclaude status` 确认门禁是否已放行且上游代理可达", 10, true)
+				"一键重检出口并在必要时解锁门禁", 10, true)
 		}
 	}
 
-	// 3. DNS 与解析约束 (Remote DNS via SOCKS5 ATYP=DOMAIN / HTTP CONNECT; Desktop v6+ disables DNS prefetch natively, login-browser enforces --host-resolver-rules)
-	dnsDetails := []string{"HTTP CONNECT/SOCKS5 远端域名解析", "Claude Desktop 内置禁用 DNS 预解析"}
+	// 3. DNS 与解析约束 (Remote DNS via SOCKS5 ATYP=DOMAIN / HTTP CONNECT; Chrome profile disables dns_prefetching natively)
+	dnsDetails := []string{"HTTP CONNECT/SOCKS5 远端域名解析", "Claude Desktop 与登录浏览器禁用本地 DNS 预解析（零警告横幅）"}
 	dnsStatus := "pass"
-	if cfg.Identity.BlockDesktopLocalDNS {
-		dnsDetails = append(dnsDetails, "独立登录浏览器 --host-resolver-rules=MAP * ~NOTFOUND")
-	} else {
+	if !cfg.Identity.DisableDesktopQUIC {
 		dnsStatus = "warn"
-		dnsDetails = append(dnsDetails, "独立登录浏览器本地 DNS 封堵已关闭")
+		dnsDetails = append(dnsDetails, "建议开启 QUIC 与非代理 UDP 禁用")
 	}
 	if _, err := os.Stat("/etc/resolver/anthropic.com"); err == nil {
 		dnsStatus = "warn"
 		dnsDetails = append(dnsDetails, "警告: /etc/resolver/anthropic.com 存在可能干扰解析")
 	}
 	add("dns_constraint", "3. DNS 与解析约束", dnsStatus, strings.Join(dnsDetails, " · "),
-		"保持 identity.block_desktop_local_dns=true", 8, true)
+		"一键启用浏览器/Desktop 远端解析与防 UDP 泄漏配置", 8, true)
 
 	// 4. 系统时区与语言 (Isolated CLI Process TZ & LANG verification)
 	tzOK, tzOut := verifyIsolatedTimezone(gateSnap.EffectiveTimezone, cfg.Identity.Locale)
@@ -595,4 +600,29 @@ func checkOAuthReachable(ctx context.Context, cfg *config.Config) (bool, string)
 	}
 	_ = resp.Body.Close()
 	return true, fmt.Sprintf("可达 (HTTP %d · %dms)", resp.StatusCode, time.Since(start).Milliseconds())
+}
+
+func fixMetadataForCheck(id, status, detail string) (fixable bool, label, action string) {
+	if status == "pass" {
+		return false, "", ""
+	}
+	switch id {
+	case "outbound_constraint":
+		if strings.Contains(detail, "直连") && strings.Contains(detail, "Socket") {
+			return true, "开启全局 PAC 并安装 pf", "install_pf_and_pac"
+		}
+		return true, "授权安装 pf 防直连规则", "install_pf"
+	case "ipv6_constraint":
+		return true, "授权启用 IPv6 阻断 (pf)", "install_pf"
+	case "terminal_channel", "egress_rules_match":
+		return true, "重检出口并解除门禁", "recheck_egress"
+	case "browser_desktop_tz_lang":
+		return true, "一键接管隔离 Desktop", "takeover_desktop"
+	case "dns_constraint", "system_tz_lang", "shared_files_isolation", "host_mgmt_api", "proxy_fail_closed", "udp_constraint", "telemetry":
+		return true, "一键启用安全防护配置", "enable_hardening"
+	case "binaries":
+		return true, "打开安装与设置指引", "repair_binaries"
+	default:
+		return false, "", ""
+	}
 }

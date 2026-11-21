@@ -344,7 +344,7 @@ else
   fail "api_contract_integrity" "pac_bad=$PAC_BAD_CODE"
 fi
 
-# 15. Execute actual JavaScript FindProxyForURL from /peaceclaude.pac to verify OAuth domains & direct Google Search
+# 15. Execute actual JavaScript FindProxyForURL from /peaceclaude.pac to verify strict Claude-only routing & DIRECT Google/regular browsing
 PAC_JS="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/peaceclaude.pac")"
 PAC_EVAL_RES="$(osascript -l JavaScript -e "$(cat <<JXA
 function dnsDomainIs(host, domain) {
@@ -361,8 +361,8 @@ function isInNet(host, pattern, mask) {
   return (ipToNum(host) & ipToNum(mask)) === (ipToNum(pattern) & ipToNum(mask));
 }
 $PAC_JS
-var proxied = ['claude.ai', 'claude.ai.', 'api.anthropic.com', 'accounts.google.com', 'accounts.google.com.', 'fonts.gstatic.com', 'oauth2.googleapis.com', 'lh3.googleusercontent.com', 'newassets.hcaptcha.com', '160.79.104.10'];
-var direct = ['www.google.com', 'google.com', 'github.com'];
+var proxied = ['claude.ai', 'claude.ai.', 'api.anthropic.com', 'claude.com', 'claudeusercontent.com', '160.79.104.10'];
+var direct = ['accounts.google.com', 'accounts.google.com.', 'oauth2.googleapis.com', 'www.googleapis.com', 'www.google.com', 'google.com', 'challenges.cloudflare.com', 'github.com', 'update.googleapis.com', 'safebrowsing.googleapis.com', 'sentry.io'];
 var bad = [];
 proxied.forEach(function(h) {
   var r = FindProxyForURL('https://' + h + '/', h);
@@ -376,17 +376,16 @@ bad.length === 0 ? 'OK' : bad.join('; ');
 JXA
 )")"
 if [[ "$PAC_EVAL_RES" == "OK" ]]; then
-  ok "pac_js_execution_oauth_and_direct_google" "PAC JS routes Claude (including trailing-dot FQDN) + Google OAuth assets while keeping www.google.com DIRECT"
+  ok "pac_js_execution_oauth_and_direct_google" "PAC JS routes strictly Claude domains/CIDRs while keeping Google OAuth, www.google.com, update.googleapis.com & sentry.io DIRECT"
 else
   fail "pac_js_execution_oauth_and_direct_google" "$PAC_EVAL_RES"
 fi
 
-# 16. Live OAuth/Anthropic asset reachability + 6-way concurrent proxy load + zero stream leak verification
+# 16. Live Anthropic static-IP proxy + direct Google OAuth chain + 6-way concurrent proxy load + zero stream leak verification
 if [[ "$CAN_LIVE" == "1" ]]; then
   ANTHROPIC_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 -x "http://127.0.0.1:${HTTP_PORT}" "https://api.anthropic.com/" || true)"
-  GOAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 -x "http://127.0.0.1:${HTTP_PORT}" "https://oauth2.googleapis.com/token" || true)"
-  GSTATIC_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 -x "http://127.0.0.1:${HTTP_PORT}" "https://www.gstatic.com/generate_204" || true)"
-  GOOGLE_AUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 -x "http://127.0.0.1:${HTTP_PORT}" "https://accounts.google.com/" || true)"
+  CLAUDE_STATUS_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 12 -x "http://127.0.0.1:${HTTP_PORT}" "https://claude.ai/cdn-cgi/trace" || true)"
+  GOOGLE_AUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 -x "http://127.0.0.1:${HTTP_PORT}" "https://accounts.google.com/gsi/client" || true)"
   CONC_FAIL=0
   CURL_PIDS=()
   for i in 1 2 3 4 5 6; do
@@ -406,10 +405,10 @@ if [[ "$CAN_LIVE" == "1" ]]; then
     fi
     sleep 0.4
   done
-  if [[ "$ANTHROPIC_CODE" =~ ^(200|403|404)$ && "$GOAUTH_CODE" =~ ^(200|400|404|405)$ && "$GSTATIC_CODE" == "204" && "$CONC_FAIL" == "0" && "$LEAKED_STREAMS" == "0" ]]; then
-    ok "live_oauth_chain_and_concurrency" "api.anthropic=$ANTHROPIC_CODE oauth2.googleapis=$GOAUTH_CODE gstatic=$GSTATIC_CODE (accounts.google=$GOOGLE_AUTH_CODE), 6x concurrent OK, active_streams=0"
+  if [[ "$ANTHROPIC_CODE" =~ ^(200|403|404)$ && "$CLAUDE_STATUS_CODE" == "200" && "$GOOGLE_AUTH_CODE" =~ ^(200|301|302|303)$ && "$CONC_FAIL" == "0" && "$LEAKED_STREAMS" == "0" ]]; then
+    ok "live_oauth_chain_and_concurrency" "api.anthropic=$ANTHROPIC_CODE claude.ai=$CLAUDE_STATUS_CODE accounts.google(direct-auth)=$GOOGLE_AUTH_CODE, 6x concurrent OK, active_streams=0"
   else
-    fail "live_oauth_chain_and_concurrency" "anthropic=$ANTHROPIC_CODE goauth=$GOAUTH_CODE gstatic=$GSTATIC_CODE google=$GOOGLE_AUTH_CODE conc_fail=$CONC_FAIL active_streams=$LEAKED_STREAMS"
+    fail "live_oauth_chain_and_concurrency" "anthropic=$ANTHROPIC_CODE claude=$CLAUDE_STATUS_CODE google=$GOOGLE_AUTH_CODE conc_fail=$CONC_FAIL active_streams=$LEAKED_STREAMS"
   fi
 fi
 

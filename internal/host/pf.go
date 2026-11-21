@@ -223,3 +223,29 @@ func InspectVMProxy(cfg *config.Config) VMProxyStatus {
 		Subnets:               cfg.Listen.VMProxySubnets,
 	}
 }
+
+// InstallPFPrivileged invokes macOS native AppleScript administrator prompt to install and load
+// the PeaceClaude pf killswitch anchor cleanly without requiring an external terminal.
+func InstallPFPrivileged(ctx context.Context, cfg *config.Config) (string, error) {
+	_, installPath, _, err := WritePFArtifacts(cfg)
+	if err != nil {
+		return "", err
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	escapedPath := strings.ReplaceAll(installPath, `\`, `\\`)
+	escapedPath = strings.ReplaceAll(escapedPath, `"`, `\"`)
+	script := fmt.Sprintf(`do shell script "/bin/bash " & quoted form of "%s" with administrator privileges`, escapedPath)
+	out, err := exec.CommandContext(cctx, "osascript", "-e", script).CombinedOutput()
+	msg := strings.TrimSpace(string(out))
+	if err != nil {
+		if msg == "" {
+			msg = err.Error()
+		}
+		return msg, fmt.Errorf("macOS 授权安装 pf 规则失败: %s", msg)
+	}
+	return msg, nil
+}

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -42,6 +43,7 @@ func (s *Server) controlHandler() http.Handler {
 	mux.HandleFunc("/api/accounts/stop-desktop", s.withCSRF(s.handleAccountStopDesktop))
 	mux.HandleFunc("/api/rules/toggle", s.withCSRF(s.handleRulesToggle))
 	mux.HandleFunc("/api/doctor", s.handleDoctor)
+	mux.HandleFunc("/api/doctor/fix", s.withCSRF(s.handleDoctorFix))
 	mux.HandleFunc("/api/diagnose", s.handleDiagnose)
 	mux.HandleFunc("/api/pause-and-recheck", s.withCSRF(s.handlePauseAndRecheck))
 	mux.HandleFunc("/api/inspect/desktop", s.handleInspectDesktop)
@@ -133,6 +135,15 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	cfg := s.configSnapshot()
 
 	profs, _ := profile.List(&cfg)
+	activeDisplayName := ""
+	activeAvatarID := ""
+	for _, p := range profs {
+		if p.Name == cfg.ActiveProfile || p.Active {
+			activeDisplayName = p.DisplayName
+			activeAvatarID = p.AvatarID
+			break
+		}
+	}
 	directHits := s.currentDirectHits()
 	remoteSt := s.remoteMgr.Status(&cfg, s.mobileBindAddr())
 	if remoteSt.ActivePair != nil {
@@ -146,23 +157,25 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":            version.Version,
-		"pid":                os.Getpid(),
-		"uptime_sec":         int64(time.Since(s.startedAt).Seconds()),
-		"host_user":          currentHostUsername(),
-		"ui_locked":          s.uiLocked.Load(),
-		"config":             cfg.Redacted(),
-		"gate":               s.gate.Snapshot(),
-		"stats":              s.audit.Stats(),
-		"clash":              host.InspectClash(cfg.Upstream.ClashSocket),
-		"vm_proxy":           host.InspectVMProxy(&cfg),
-		"active_profile":     cfg.ActiveProfile,
-		"profiles_count":     len(profs),
-		"rules":              profile.GetRulesStatus(&cfg),
-		"direct_leaks_count": len(directHits),
-		"browser_pac":        host.InspectBrowserPAC(&cfg),
-		"storage":            collectStorageSummary(),
-		"remote":             remoteSt,
+		"version":             version.Version,
+		"pid":                 os.Getpid(),
+		"uptime_sec":          int64(time.Since(s.startedAt).Seconds()),
+		"host_user":           currentHostUsername(),
+		"ui_locked":           s.uiLocked.Load(),
+		"config":              cfg.Redacted(),
+		"gate":                s.gate.Snapshot(),
+		"stats":               s.audit.Stats(),
+		"clash":               host.InspectClash(cfg.Upstream.ClashSocket),
+		"vm_proxy":            host.InspectVMProxy(&cfg),
+		"active_profile":      cfg.ActiveProfile,
+		"active_display_name": activeDisplayName,
+		"active_avatar_id":    activeAvatarID,
+		"profiles_count":      len(profs),
+		"rules":               profile.GetRulesStatus(&cfg),
+		"direct_leaks_count":  len(directHits),
+		"browser_pac":         host.InspectBrowserPAC(&cfg),
+		"storage":             collectStorageSummary(),
+		"remote":              remoteSt,
 	})
 }
 
@@ -485,6 +498,7 @@ func (s *Server) handleAccountUpdate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name               string  `json:"name"`
 		DisplayName        *string `json:"display_name"`
+		AvatarID           *string `json:"avatar_id"`
 		Note               *string `json:"note"`
 		ManualPlan         *string `json:"manual_plan"`
 		ManualRegisteredAt *string `json:"manual_registered_at"`
@@ -499,14 +513,19 @@ func (s *Server) handleAccountUpdate(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	cfg := *s.cfg
 	s.mu.RUnlock()
-	locked := (body.ManualPlan != nil && strings.TrimSpace(*body.ManualPlan) != "") ||
-		(body.ManualRegisteredAt != nil && strings.TrimSpace(*body.ManualRegisteredAt) != "")
+	var lockedPtr *bool
+	if body.ManualPlan != nil || body.ManualRegisteredAt != nil {
+		locked := (body.ManualPlan != nil && strings.TrimSpace(*body.ManualPlan) != "") ||
+			(body.ManualRegisteredAt != nil && strings.TrimSpace(*body.ManualRegisteredAt) != "")
+		lockedPtr = &locked
+	}
 	updated, err := profile.UpdateMeta(&cfg, name, profile.MetaPatch{
 		DisplayName:        body.DisplayName,
+		AvatarID:           body.AvatarID,
 		Note:               body.Note,
 		ManualPlan:         body.ManualPlan,
 		ManualRegisteredAt: body.ManualRegisteredAt,
-		ManualLocked:       &locked,
+		ManualLocked:       lockedPtr,
 		Timezone:           body.Timezone,
 		Language:           body.Language,
 	})
@@ -657,6 +676,197 @@ func (s *Server) handleDoctor(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	rep := host.RunDoctor(ctx, &cfg, true, s.gate.Snapshot())
 	writeJSON(w, http.StatusOK, rep)
+}
+
+func (s *Server) handleDoctorFix(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		CheckID string `json:"check_id"`
+		Action  string `json:"action"`
+		FixAll  bool   `json:"fix_all"`
+	}
+	if err := decodeJSON(r, &body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 55*time.Second)
+	defer cancel()
+
+	cfg := s.configSnapshot()
+	var actions []string
+	var errorsList []string
+	didHardening := false
+	didRecheck := false
+	didTakeover := false
+	didPF := false
+
+	applyAction := func(act string) {
+		switch act {
+		case "enable_hardening":
+			if didHardening {
+				return
+			}
+			didHardening = true
+			s.mu.Lock()
+			next := *s.cfg
+			next.Egress.FailClosed = true
+			next.Shield.TelemetryShield = true
+			next.Identity.SyncTimezone = true
+			next.Identity.StripHostAnthropicEnv = true
+			next.Identity.DisableDesktopQUIC = true
+			next.Identity.BlockDesktopLocalDNS = true
+			next.Identity.AutoPeaceDesktop = true
+			if strings.TrimSpace(next.Identity.Language) == "" {
+				next.Identity.Language = "en-US"
+			}
+			if strings.TrimSpace(next.Identity.Locale) == "" {
+				next.Identity.Locale = "en_US.UTF-8"
+			}
+			if next.Listen.BindAddr == "" {
+				next.Listen.BindAddr = "127.0.0.1"
+			}
+			_, _ = profile.Ensure(&next, next.ActiveProfile, "")
+			if err := config.Save(&next); err != nil {
+				errorsList = append(errorsList, "保存安全配置失败: "+err.Error())
+			} else {
+				s.swapConfigLocked(next)
+				_ = os.Chmod(config.ConfigPath(), 0o600)
+				actions = append(actions, "已一键开启 Fail-Closed 门禁、遥测护盾、时区同步、env 剥离与防 QUIC/UDP 泄漏加固")
+			}
+			s.mu.Unlock()
+		case "enable_pac":
+			if os.Getenv("PEACECLAUDE_HOME") == "" {
+				if _, _, err := host.SetSystemBrowserPAC(&cfg, true, false); err != nil {
+					errorsList = append(errorsList, "开启浏览器 PAC 失败: "+err.Error())
+				} else {
+					s.mu.Lock()
+					next := *s.cfg
+					autoTrue := true
+					next.Listen.AutoEnableBrowserPAC = &autoTrue
+					next.Listen.BrowserPACPaused = false
+					if config.Save(&next) == nil {
+						s.swapConfigLocked(next)
+					}
+					s.mu.Unlock()
+					actions = append(actions, "已开启系统普通浏览器全局 PAC 接管")
+				}
+			}
+		case "takeover_desktop":
+			if didTakeover {
+				return
+			}
+			didTakeover = true
+			term, pid, blocked, err := s.TakeoverAllExposed(ctx)
+			if err != nil {
+				errorsList = append(errorsList, "接管原生 Desktop 失败: "+err.Error())
+			} else if blocked != "" {
+				errorsList = append(errorsList, "已停止未隔离进程但门禁锁定暂未重启: "+blocked)
+			} else {
+				actions = append(actions, fmt.Sprintf("已接管 %d 个原生 Desktop 实例并启动隔离窗口 (PID=%d)", term, pid))
+			}
+		case "recheck_egress":
+			if didRecheck {
+				return
+			}
+			didRecheck = true
+			s.gate.SetManualLock(false, "")
+			res := s.gate.Check(ctx, false)
+			if res.OK {
+				actions = append(actions, fmt.Sprintf("出口复检通过：%s (%s · %dms)", res.EgressIP, res.Country, res.LatencyMs))
+			} else {
+				errorsList = append(errorsList, "出口重检仍异常: "+res.FailureReason)
+			}
+		case "install_pf_and_pac":
+			if os.Getenv("PEACECLAUDE_HOME") == "" {
+				if _, _, err := host.SetSystemBrowserPAC(&cfg, true, false); err == nil {
+					s.mu.Lock()
+					next := *s.cfg
+					autoTrue := true
+					next.Listen.AutoEnableBrowserPAC = &autoTrue
+					next.Listen.BrowserPACPaused = false
+					if config.Save(&next) == nil {
+						s.swapConfigLocked(next)
+					}
+					s.mu.Unlock()
+					actions = append(actions, "已自动开启浏览器全局 PAC")
+				}
+			}
+			fallthrough
+		case "install_pf":
+			if didPF {
+				return
+			}
+			didPF = true
+			if os.Getenv("PEACECLAUDE_HOME") != "" {
+				actions = append(actions, "沙盒环境跳过 macOS 管理员弹窗授权，请在实际宿主使用 `sudo bash install-pf.sh`")
+				return
+			}
+			if _, err := host.InstallPFPrivileged(ctx, &cfg); err != nil {
+				errorsList = append(errorsList, err.Error())
+			} else {
+				actions = append(actions, "已通过管理员授权成功安装并激活 macOS pf 防直连与 IPv6 阻断规则")
+			}
+		case "repair_binaries":
+			_, _ = profile.Ensure(&cfg, cfg.ActiveProfile, "")
+			_, _, _, _ = host.WritePFArtifacts(&cfg)
+			actions = append(actions, "已补齐隔离目录与 pf 脚本产物（若缺 CLI 或 Claude.app 请确认系统安装路径）")
+		default:
+			if act != "" {
+				errorsList = append(errorsList, "未知修复动作: "+act)
+			}
+		}
+	}
+
+	if body.FixAll {
+		// Automatically apply non-disruptive fixes, and also enable PAC + takeover if needed.
+		curRep := host.RunDoctor(ctx, &cfg, true, s.gate.Snapshot())
+		for _, ck := range curRep.Checks {
+			if ck.Status == "pass" || !ck.Fixable {
+				continue
+			}
+			if ck.FixAction == "install_pf" || ck.FixAction == "install_pf_and_pac" {
+				// Enable PAC if needed; leave privileged pf prompt to explicit click unless requested via check_id.
+				if ck.FixAction == "install_pf_and_pac" {
+					applyAction("enable_pac")
+				}
+				continue
+			}
+			applyAction(ck.FixAction)
+		}
+	} else {
+		act := strings.TrimSpace(body.Action)
+		if act == "" && strings.TrimSpace(body.CheckID) != "" {
+			curRep := host.RunDoctor(ctx, &cfg, true, s.gate.Snapshot())
+			for _, ck := range curRep.Checks {
+				if ck.ID == body.CheckID {
+					act = ck.FixAction
+					break
+				}
+			}
+		}
+		if act == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing check_id or action"})
+			return
+		}
+		applyAction(act)
+	}
+
+	cfgAfter := s.configSnapshot()
+	freshRep := host.RunDoctor(ctx, &cfgAfter, true, s.gate.Snapshot())
+	statusCode := http.StatusOK
+	errMsg := ""
+	if len(errorsList) > 0 {
+		errMsg = strings.Join(errorsList, "；")
+		if len(actions) == 0 {
+			statusCode = http.StatusPreconditionFailed
+		}
+	}
+	writeJSON(w, statusCode, map[string]any{
+		"ok":      len(errorsList) == 0,
+		"error":   errMsg,
+		"actions": actions,
+		"errors":  errorsList,
+		"doctor":  freshRep,
+	})
 }
 
 func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
@@ -818,6 +1028,19 @@ func (s *Server) handleBrowserPAC(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	s.mu.Lock()
+	next := *s.cfg
+	autoTrue := true
+	if wantEnabled {
+		next.Listen.AutoEnableBrowserPAC = &autoTrue
+		next.Listen.BrowserPACPaused = false
+	} else {
+		next.Listen.BrowserPACPaused = true
+	}
+	if config.Save(&next) == nil {
+		s.swapConfigLocked(next)
+	}
+	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, st)
 }
 
@@ -838,8 +1061,9 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		SkipProbeDuringSSE    *bool    `json:"skip_probe_during_sse"`
 		StripHostAnthropicEnv *bool    `json:"strip_host_anthropic_env"`
 		AllowCorporateDirect  *bool    `json:"allow_corporate_direct"`
+		ProxyAuthDomains      *bool    `json:"proxy_auth_domains"`
 		VMProxyEnabled        *bool    `json:"vm_proxy_enabled"`
-		AutoPeaceDesktop       *bool    `json:"auto_peace_desktop"`
+		AutoPeaceDesktop      *bool    `json:"auto_peace_desktop"`
 		SingleActiveDesktop   *bool    `json:"single_active_desktop"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
@@ -889,6 +1113,9 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.AllowCorporateDirect != nil {
 		next.Shield.AllowCorporateDirect = *body.AllowCorporateDirect
+	}
+	if body.ProxyAuthDomains != nil {
+		next.Shield.ProxyAuthDomains = *body.ProxyAuthDomains
 	}
 	if body.VMProxyEnabled != nil {
 		next.Listen.VMProxyEnabled = *body.VMProxyEnabled

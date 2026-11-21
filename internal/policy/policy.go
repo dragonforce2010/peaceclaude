@@ -64,15 +64,22 @@ var (
 
 	defaultAuthDomains = []string{
 		"accounts.google.com",
+		"oauth2.googleapis.com",
 		"oauthaccountmanager.googleapis.com",
 		"apis.google.com",
-		"gstatic.com",
-		"googleapis.com",
-		"googleusercontent.com",
+		"www.googleapis.com",
+		"people.googleapis.com",
+		"openidconnect.googleapis.com",
+		"www.gstatic.com",
+		"ssl.gstatic.com",
+		"fonts.gstatic.com",
+		"encrypted-tbn0.gstatic.com",
+		"lh3.googleusercontent.com",
 		"hcaptcha.com",
 		"challenges.cloudflare.com",
 		"turnstile.cloudflare.com",
 		"appleid.apple.com",
+		"idmsa.apple.com",
 		"stripe.com",
 		"js.stripe.com",
 		"m.stripe.network",
@@ -335,6 +342,13 @@ func (e *Engine) Evaluate(hostport string, gateOpen bool, gateReason string) Dec
 		dec.Action = ActionDirectLocal
 		dec.Reason = "private LAN direct"
 		return dec
+
+	case CategoryAuth:
+		if cfg == nil || !cfg.Shield.ProxyAuthDomains {
+			dec.Action = ActionDirectLocal
+			dec.Reason = "direct via normal host network (strict Claude-only proxy mode)"
+			return dec
+		}
 	}
 
 	// Protected or public egress traffic.

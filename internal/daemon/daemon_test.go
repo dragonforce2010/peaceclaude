@@ -352,6 +352,88 @@ func TestAutoPeaceSafetyGuards(t *testing.T) {
 	if rr.code != http.StatusBadRequest {
 		t.Fatalf("expected 400 when enabled boolean omitted in /api/browser-pac, got %d", rr.code)
 	}
+
+	// 6. /api/doctor/fix contract: missing action -> 400, enable_hardening -> 200 and fixes config flags.
+	reqBadFix, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/doctor/fix", bytes.NewBufferString(`{}`))
+	reqBadFix.Header.Set("Origin", "http://127.0.0.1")
+	rrBadFix := newResponseRecorder()
+	srv2.withCSRF(srv2.handleDoctorFix)(rrBadFix, reqBadFix)
+	if rrBadFix.code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty /api/doctor/fix, got %d", rrBadFix.code)
+	}
+
+	srv2.mu.Lock()
+	srv2.cfg.Egress.FailClosed = false
+	srv2.cfg.Shield.TelemetryShield = false
+	srv2.mu.Unlock()
+	reqGoodFix, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/doctor/fix", bytes.NewBufferString(`{"action":"enable_hardening"}`))
+	reqGoodFix.Header.Set("Origin", "http://127.0.0.1")
+	rrGoodFix := newResponseRecorder()
+	srv2.withCSRF(srv2.handleDoctorFix)(rrGoodFix, reqGoodFix)
+	if rrGoodFix.code != http.StatusOK {
+		t.Fatalf("expected 200 for enable_hardening fix, got %d: %s", rrGoodFix.code, rrGoodFix.body.String())
+	}
+	snapAfterFix := srv2.configSnapshot()
+	if !snapAfterFix.Egress.FailClosed || !snapAfterFix.Shield.TelemetryShield {
+		t.Fatalf("expected FailClosed and TelemetryShield enabled after fix, got %+v %+v", snapAfterFix.Egress.FailClosed, snapAfterFix.Shield.TelemetryShield)
+	}
+}
+
+func TestHandleAccountUpdatePreservesManualLockAndStatusReflectsIdentity(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_NO_NOTIFY", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_AUTO_PEACE", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
+
+	srv := New(config.Default(), "/usr/bin/true")
+
+	// 1. Lock manual_plan first on default profile.
+	reqLock, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/accounts/update", bytes.NewBufferString(`{"name":"default","manual_plan":"Max 5x"}`))
+	reqLock.Header.Set("Origin", "http://127.0.0.1")
+	rrLock := newResponseRecorder()
+	srv.withCSRF(srv.handleAccountUpdate)(rrLock, reqLock)
+	if rrLock.code != http.StatusOK {
+		t.Fatalf("seed manual_plan failed (%d): %s", rrLock.code, rrLock.body.String())
+	}
+
+	// 2. Identity-only update (display_name + avatar_id) MUST preserve manual_locked and manual_plan.
+	reqIdent, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/accounts/update", bytes.NewBufferString(`{"name":"default","display_name":"金狮主力","avatar_id":"lion"}`))
+	reqIdent.Header.Set("Origin", "http://127.0.0.1")
+	rrIdent := newResponseRecorder()
+	srv.withCSRF(srv.handleAccountUpdate)(rrIdent, reqIdent)
+	if rrIdent.code != http.StatusOK {
+		t.Fatalf("identity update failed (%d): %s", rrIdent.code, rrIdent.body.String())
+	}
+	var updated struct {
+		DisplayName  string `json:"display_name"`
+		AvatarID     string `json:"avatar_id"`
+		ManualPlan   string `json:"manual_plan"`
+		ManualLocked bool   `json:"manual_locked"`
+	}
+	if err := json.Unmarshal(rrIdent.body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.DisplayName != "金狮主力" || updated.AvatarID != "lion" || updated.ManualPlan != "Max 5x" || !updated.ManualLocked {
+		t.Fatalf("identity update corrupted manual lock or identity: %+v", updated)
+	}
+
+	// 3. /api/status must expose active_display_name & active_avatar_id for instant sidebar hydration.
+	reqSt, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/api/status", nil)
+	rrSt := newResponseRecorder()
+	srv.handleStatus(rrSt, reqSt)
+	if rrSt.code != http.StatusOK {
+		t.Fatalf("handleStatus failed: %d", rrSt.code)
+	}
+	var st struct {
+		ActiveDisplayName string `json:"active_display_name"`
+		ActiveAvatarID    string `json:"active_avatar_id"`
+	}
+	if err := json.Unmarshal(rrSt.body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.ActiveDisplayName != "金狮主力" || st.ActiveAvatarID != "lion" {
+		t.Fatalf("expected status identity 金狮主力/lion, got %+v", st)
+	}
 }
 
 type simpleRecorder struct {

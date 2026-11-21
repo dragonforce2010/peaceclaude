@@ -233,7 +233,27 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.syncMobileListener(s.cfg); err != nil {
 		log.Printf("[remote] failed to start mobile listener: %v", err)
 	}
+	if os.Getenv("PEACECLAUDE_HOME") == "" && os.Getenv("PEACECLAUDE_NO_SYS_PAC") == "" && s.cfg.ShouldAutoEnableBrowserPAC() {
+		go s.ensureDefaultBrowserPAC()
+	}
 	return nil
+}
+
+func (s *Server) ensureDefaultBrowserPAC() {
+	cfg := s.configSnapshot()
+	if !cfg.ShouldAutoEnableBrowserPAC() {
+		return
+	}
+	st := host.InspectBrowserPAC(&cfg)
+	if st.MatchesPeace {
+		return
+	}
+	nextSt, _, err := host.SetSystemBrowserPAC(&cfg, true, false)
+	if err != nil {
+		log.Printf("[browser-pac] auto-enable skipped: %v", err)
+		return
+	}
+	log.Printf("[browser-pac] auto-enabled default PAC (%s) on services=%v", nextSt.PACURL, nextSt.ActiveServices)
 }
 
 func (s *Server) retentionLoop(ctx context.Context) {
