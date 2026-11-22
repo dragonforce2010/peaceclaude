@@ -688,6 +688,21 @@ func printHumanStatus(cfg *config.Config, running bool, st map[string]any) {
 	}
 	fmt.Printf("  出口门禁:   %s\n", gateLabel)
 	fmt.Printf("  上游链路:   %s://%s\n", cfg.Upstream.Mode, cfg.Upstream.Address)
+	if ur, ok := st["upstream_route"].(map[string]any); ok {
+		activeIF, _ := ur["active_interface"].(string)
+		boundPhys, _ := ur["bound_physical"].(bool)
+		usingFB, _ := ur["using_fallback"].(bool)
+		skipReason, _ := ur["skipped_reason"].(string)
+		switch {
+		case boundPhys && activeIF != "":
+			fmt.Printf("  出站网卡:   %s (直连物理网卡绕开 VPN)\n", activeIF)
+		case usingFB:
+			fbReason, _ := ur["fallback_reason"].(string)
+			fmt.Printf("  出站网卡:   系统默认路由 (物理绑定失败已自动回退: %s)\n", fbReason)
+		default:
+			fmt.Printf("  出站网卡:   系统默认路由 (%s)\n", nonEmpty(skipReason, "未绑定物理网卡"))
+		}
+	}
 	fmt.Printf("  静态出口IP: %s (%s %s) | 预期锁定: %s\n",
 		nonEmpty(ip, "未获取"), nonEmpty(country, "?"), city, nonEmpty(cfg.Egress.ExpectedIP, "未锁定"))
 	fmt.Printf("  隔离指纹:   TZ=%s | LANG=%s\n", nonEmpty(tz, "America/New_York"), nonEmpty(lang, cfg.Identity.Language))
@@ -1353,7 +1368,7 @@ func cmdConfig(args []string) error {
 		return nil
 	case "set":
 		if len(rest) < 2 {
-			return errors.New("用法: peaceclaude config set <expected_ip|strict_split|telemetry_shield|auto_peace_desktop|auto_start_launch_agent|cli_path|timezone|language> <value>")
+			return errors.New("用法: peaceclaude config set <expected_ip|strict_split|telemetry_shield|auto_peace_desktop|auto_start_launch_agent|bypass_vpn|outbound_interface|cli_path|timezone|language> <value>")
 		}
 		k, v := rest[0], rest[1]
 		switch k {
@@ -1368,6 +1383,15 @@ func cmdConfig(args []string) error {
 		case "auto_start_launch_agent":
 			b := (v == "true" || v == "1" || v == "on")
 			cfg.Listen.AutoStartLaunchAgent = &b
+		case "bypass_vpn":
+			b := (v == "true" || v == "1" || v == "on")
+			cfg.Upstream.BypassVPN = &b
+		case "outbound_interface":
+			clean := strings.TrimSpace(v)
+			if strings.EqualFold(clean, "auto") || clean == "-" {
+				clean = ""
+			}
+			cfg.Upstream.OutboundInterface = clean
 		case "cli_path":
 			cfg.Binaries.ClaudeCLIPath = v
 		case "timezone":

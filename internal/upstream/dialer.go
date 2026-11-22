@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -20,8 +21,10 @@ import (
 )
 
 const (
-	defaultMaxWarmIdle = 4
-	warmConnMaxAge     = 18 * time.Second
+	defaultMaxWarmIdle      = 4
+	warmConnMaxAge          = 18 * time.Second
+	bypassFallbackCooldown  = 5 * time.Minute
+	physicalBindMaxTryDelay = 4500 * time.Millisecond
 )
 
 type warmConn struct {
@@ -29,15 +32,28 @@ type warmConn struct {
 	createdAt time.Time
 }
 
+// RouteSnapshot summarizes how upstream connections currently choose the outbound network interface.
+type RouteSnapshot struct {
+	BypassEnabled   bool   `json:"bypass_enabled"`
+	ConfiguredIface string `json:"configured_interface,omitempty"`
+	ActiveInterface string `json:"active_interface,omitempty"`
+	BoundPhysical   bool   `json:"bound_physical"`
+	UsingFallback   bool   `json:"using_fallback,omitempty"`
+	FallbackReason  string `json:"fallback_reason,omitempty"`
+	SkippedReason   string `json:"skipped_reason,omitempty"`
+}
+
 // Dialer dials outbound target addresses strictly through the configured upstream proxy.
 // It never falls back to direct host connections.
 type Dialer struct {
-	Mode        string // "local-proxy" | "direct-socks5" | "direct-http"
-	Address     string
-	Username    string
-	Password    string
-	Timeout     time.Duration
-	MaxWarmIdle int
+	Mode              string // "local-proxy" | "direct-socks5" | "direct-http"
+	Address           string
+	Username          string
+	Password          string
+	BypassVPN         bool
+	OutboundInterface string
+	Timeout           time.Duration
+	MaxWarmIdle       int
 
 	poolMu        sync.Mutex
 	warmPool      []warmConn
@@ -47,16 +63,23 @@ type Dialer struct {
 
 	protoMu     sync.RWMutex
 	socks5Hosts map[string]bool
+
+	routeMu             sync.RWMutex
+	lastBoundInterface  string
+	bypassFallbackUntil time.Time
+	bypassFallbackErr   string
 }
 
 func FromConfig(cfg config.UpstreamConfig) *Dialer {
 	return &Dialer{
-		Mode:        cfg.Mode,
-		Address:     cfg.Address,
-		Username:    cfg.Username,
-		Password:    cfg.Password,
-		Timeout:     12 * time.Second,
-		MaxWarmIdle: defaultMaxWarmIdle,
+		Mode:              cfg.Mode,
+		Address:           cfg.Address,
+		Username:          cfg.Username,
+		Password:          cfg.Password,
+		BypassVPN:         cfg.ShouldBypassVPN(),
+		OutboundInterface: strings.TrimSpace(cfg.OutboundInterface),
+		Timeout:           12 * time.Second,
+		MaxWarmIdle:       defaultMaxWarmIdle,
 	}
 }
 
@@ -69,12 +92,14 @@ func BackupFromConfig(cfg config.UpstreamConfig) *Dialer {
 		mode = cfg.Mode
 	}
 	return &Dialer{
-		Mode:        mode,
-		Address:     cfg.BackupAddress,
-		Username:    cfg.BackupUsername,
-		Password:    cfg.BackupPassword,
-		Timeout:     12 * time.Second,
-		MaxWarmIdle: defaultMaxWarmIdle,
+		Mode:              mode,
+		Address:           cfg.BackupAddress,
+		Username:          cfg.BackupUsername,
+		Password:          cfg.BackupPassword,
+		BypassVPN:         cfg.ShouldBypassVPN(),
+		OutboundInterface: strings.TrimSpace(cfg.OutboundInterface),
+		Timeout:           12 * time.Second,
+		MaxWarmIdle:       defaultMaxWarmIdle,
 	}
 }
 
@@ -142,6 +167,152 @@ func isGoogleAuthDomain(host string) bool {
 	return false
 }
 
+func isLoopbackOrPrivateHost(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		host = strings.TrimSpace(addr)
+	}
+	host = strings.Trim(strings.ToLower(strings.TrimSuffix(host, ".")), "[]")
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
+}
+
+func (d *Dialer) resolveTargetInterface() string {
+	if d == nil {
+		return ""
+	}
+	if iface := strings.TrimSpace(d.OutboundInterface); iface != "" {
+		return iface
+	}
+	return detectPhysicalOutboundInterface()
+}
+
+// RouteStatus reports the current outbound interface binding and VPN-bypass state.
+func (d *Dialer) RouteStatus() RouteSnapshot {
+	if d == nil {
+		return RouteSnapshot{ActiveInterface: "system-default", SkippedReason: "nil dialer"}
+	}
+	snap := RouteSnapshot{
+		BypassEnabled:   d.BypassVPN,
+		ConfiguredIface: strings.TrimSpace(d.OutboundInterface),
+	}
+	if !d.BypassVPN {
+		snap.ActiveInterface = "system-default"
+		snap.SkippedReason = "bypass_vpn=false"
+		return snap
+	}
+	if d.Mode != "direct-http" && d.Mode != "direct-socks5" {
+		snap.ActiveInterface = "system-default"
+		snap.SkippedReason = fmt.Sprintf("mode=%s uses local proxy routing", d.Mode)
+		return snap
+	}
+	if isLoopbackOrPrivateHost(d.Address) {
+		snap.ActiveInterface = "system-default"
+		snap.SkippedReason = "loopback or private upstream address"
+		return snap
+	}
+
+	d.routeMu.RLock()
+	lastBound := d.lastBoundInterface
+	fbUntil := d.bypassFallbackUntil
+	fbErr := d.bypassFallbackErr
+	d.routeMu.RUnlock()
+
+	if !fbUntil.IsZero() && time.Now().Before(fbUntil) {
+		snap.ActiveInterface = "system-default (fallback)"
+		snap.UsingFallback = true
+		snap.FallbackReason = fbErr
+		return snap
+	}
+
+	iface := d.resolveTargetInterface()
+	if iface == "" {
+		snap.ActiveInterface = "system-default"
+		snap.SkippedReason = "no usable physical interface detected"
+		return snap
+	}
+	if lastBound != "" {
+		iface = lastBound
+	}
+	snap.ActiveInterface = iface
+	snap.BoundPhysical = true
+	return snap
+}
+
+func (d *Dialer) dialUpstreamTCP(ctx context.Context, timeout time.Duration) (net.Conn, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	canBind := d.BypassVPN &&
+		(d.Mode == "direct-http" || d.Mode == "direct-socks5") &&
+		!isLoopbackOrPrivateHost(d.Address)
+
+	if canBind {
+		d.routeMu.RLock()
+		inFallback := !d.bypassFallbackUntil.IsZero() && time.Now().Before(d.bypassFallbackUntil)
+		d.routeMu.RUnlock()
+
+		if !inFallback {
+			if iface := d.resolveTargetInterface(); iface != "" {
+				if ctrl := bindSocketToInterface(iface); ctrl != nil {
+					bindBudget := timeout
+					if bindBudget > physicalBindMaxTryDelay {
+						bindBudget = physicalBindMaxTryDelay
+					}
+					bindCtx, cancel := context.WithTimeout(ctx, bindBudget)
+					nd := &net.Dialer{
+						Timeout:   bindBudget,
+						KeepAlive: 15 * time.Second,
+						Control:   ctrl,
+					}
+					conn, bindErr := nd.DialContext(bindCtx, "tcp", d.Address)
+					cancel()
+					if bindErr == nil {
+						d.routeMu.Lock()
+						d.lastBoundInterface = iface
+						d.bypassFallbackUntil = time.Time{}
+						d.bypassFallbackErr = ""
+						d.routeMu.Unlock()
+						return conn, nil
+					}
+					if ctx.Err() == nil {
+						// Automatic seamless fallback to system default routing if physical bind failed.
+						fbDialer := &net.Dialer{
+							Timeout:   timeout,
+							KeepAlive: 15 * time.Second,
+						}
+						if fbConn, fbErr := fbDialer.DialContext(ctx, "tcp", d.Address); fbErr == nil {
+							d.routeMu.Lock()
+							d.bypassFallbackUntil = time.Now().Add(bypassFallbackCooldown)
+							d.bypassFallbackErr = bindErr.Error()
+							d.routeMu.Unlock()
+							log.Printf("[upstream-route] physical interface %s bind failed (%v); fell back to system default route for 5m", iface, bindErr)
+							return fbConn, nil
+						}
+					}
+					return nil, fmt.Errorf("connect upstream %s via %s: %w", d.Address, iface, bindErr)
+				}
+			}
+		}
+	}
+
+	nd := &net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 15 * time.Second,
+	}
+	conn, err := nd.DialContext(ctx, "tcp", d.Address)
+	if err != nil {
+		return nil, fmt.Errorf("connect upstream %s: %w", d.Address, err)
+	}
+	return conn, nil
+}
+
 // ProbeSOCKS5Support checks once whether a direct-http dual-protocol upstream also speaks SOCKS5
 // so Google OAuth hosts can bypass plaintext HTTP CONNECT DPI from the very first request.
 func (d *Dialer) ProbeSOCKS5Support(ctx context.Context) bool {
@@ -153,8 +324,7 @@ func (d *Dialer) ProbeSOCKS5Support(ctx context.Context) bool {
 	}
 	pctx, cancel := context.WithTimeout(ctx, 2200*time.Millisecond)
 	defer cancel()
-	nd := &net.Dialer{Timeout: 2200 * time.Millisecond}
-	c, err := nd.DialContext(pctx, "tcp", d.Address)
+	c, err := d.dialUpstreamTCP(pctx, 2200*time.Millisecond)
 	if err != nil {
 		return false
 	}
@@ -271,13 +441,9 @@ func (d *Dialer) dialRawProxyFresh(ctx context.Context) (net.Conn, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	nd := &net.Dialer{
-		Timeout:   timeout,
-		KeepAlive: 15 * time.Second,
-	}
-	conn, err := nd.DialContext(ctx, "tcp", d.Address)
+	conn, err := d.dialUpstreamTCP(ctx, timeout)
 	if err != nil {
-		return nil, fmt.Errorf("connect upstream %s: %w", d.Address, err)
+		return nil, err
 	}
 	if tc, ok := conn.(*net.TCPConn); ok {
 		// Disable Nagle so proxy CONNECT / SOCKS5 greeting + TLS ClientHello flush immediately over high-RTT links.
@@ -303,6 +469,10 @@ func (d *Dialer) DrainPool() {
 	d.protoMu.Lock()
 	d.socks5Hosts = nil
 	d.protoMu.Unlock()
+	d.routeMu.Lock()
+	d.bypassFallbackUntil = time.Time{}
+	d.bypassFallbackErr = ""
+	d.routeMu.Unlock()
 	for _, wc := range conns {
 		_ = wc.conn.Close()
 	}

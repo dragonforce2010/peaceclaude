@@ -793,6 +793,14 @@
                 <input type="checkbox" id="cfg-proxy-auth-domains" />
                 <span>同时经静态 IP 代理 Google / Apple / Cloudflare 登录域（默认关闭，仅当您本机直连打不开 Google 登录页时勾选）</span>
               </label>
+
+              <div class="pac-row" style="margin-top:12px;">
+                <label class="switch-label" style="color:var(--text); margin:0;">
+                  <input type="checkbox" id="cfg-bypass-vpn" />
+                  <span>直连静态代理时绑定物理出口网卡绕开公司 VPN (<code>utun</code>)，失败自动回退，不影响公司内网与飞书</span>
+                </label>
+                <span class="status-tag" id="upstream-route-hint">--</span>
+              </div>
             </div>
 
             <div class="card">

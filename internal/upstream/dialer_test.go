@@ -391,3 +391,106 @@ func TestDirectHTTPRoutesGoogleAndResetsViaSOCKS5(t *testing.T) {
 		t.Fatalf("expected learned host to bypass HTTP CONNECT directly (http=1, socks=2), got http=%d socks=%d", httpConnectCount.Load(), socks5Count.Load())
 	}
 }
+
+
+func TestIsLoopbackOrPrivateHost(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{"127.0.0.1:5492", true},
+		{"127.0.0.1:7897", true},
+		{"localhost:18897", true},
+		{"sub.localhost:8080", true},
+		{"[::1]:1080", true},
+		{"192.168.1.10:8080", true},
+		{"10.4.235.1:8080", true},
+		{"172.16.0.1:443", true},
+		{"169.254.1.1:443", true},
+		{"203.0.113.42:5492", false},
+		{"198.51.100.18:443", false},
+		{"proxy.example.com:8080", false},
+	}
+	for _, tc := range cases {
+		if got := isLoopbackOrPrivateHost(tc.addr); got != tc.want {
+			t.Fatalf("isLoopbackOrPrivateHost(%q) = %t, want %t", tc.addr, got, tc.want)
+		}
+	}
+}
+
+func TestParsePhysicalDefaultInterface(t *testing.T) {
+	if got := ParsePhysicalDefaultForTest(
+		"Destination        Gateway            Flags               Netif Expire\n"+
+			"default            link#24            UCSIg               utun6       \n"+
+			"default            192.168.1.1        UGScg                 en0       \n"+
+			"10.0.0.0/8         10.0.0.1           UGSc                utun6       \n",
+		func(n string) bool { return n == "en0" },
+	); got != "en0" {
+		t.Fatalf("expected en0 even when utun6 default appears first, got %q", got)
+	}
+
+	if got := ParsePhysicalDefaultForTest(
+		"default            link#24            UCSIg               utun6       \n",
+		func(string) bool { return true },
+	); got != "" {
+		t.Fatalf("expected empty when only utun6 exists, got %q", got)
+	}
+}
+
+func TestUpstreamBypassVPNLocalhostNeverBinds(t *testing.T) {
+	echoAddr, stopEcho := startEchoServer(t)
+	defer stopEcho()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				br := bufio.NewReader(conn)
+				req, err := http.ReadRequest(br)
+				if err != nil {
+					return
+				}
+				_ = req.Body.Close()
+				dst, err := net.Dial("tcp", echoAddr)
+				if err != nil {
+					return
+				}
+				defer dst.Close()
+				_, _ = io.WriteString(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+				go func() { _, _ = io.Copy(dst, br) }()
+				_, _ = io.Copy(conn, dst)
+			}(c)
+		}
+	}()
+
+	d := &Dialer{
+		Mode:      "direct-http",
+		Address:   ln.Addr().String(),
+		BypassVPN: true,
+		Timeout:   2 * time.Second,
+	}
+	conn, err := d.DialContext(context.Background(), "tcp", "claude.ai:443")
+	if err != nil {
+		t.Fatalf("localhost direct-http with BypassVPN=true failed: %v", err)
+	}
+	_, _ = conn.Write([]byte("ping"))
+	buf := make([]byte, 4)
+	if _, err := io.ReadFull(conn, buf); err != nil || string(buf) != "ping" {
+		t.Fatalf("roundtrip mismatch: err=%v buf=%q", err, buf)
+	}
+	_ = conn.Close()
+
+	st := d.RouteStatus()
+	if st.BoundPhysical || st.ActiveInterface != "system-default" || !strings.Contains(st.SkippedReason, "loopback") {
+		t.Fatalf("expected localhost upstream to stay on system-default without binding, got %+v", st)
+	}
+}

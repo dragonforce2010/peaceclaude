@@ -45,16 +45,25 @@ func (c *Config) ShouldAutoEnableBrowserPAC() bool {
 
 type UpstreamConfig struct {
 	// Mode: "local-proxy" | "direct-socks5" | "direct-http"
-	Mode           string `json:"mode"`
-	Address        string `json:"address"`
-	Username       string `json:"username,omitempty"`
-	Password       string `json:"password,omitempty"`
-	BackupMode     string `json:"backup_mode,omitempty"`
-	BackupAddress  string `json:"backup_address,omitempty"`
-	BackupUsername string `json:"backup_username,omitempty"`
-	BackupPassword string `json:"backup_password,omitempty"`
-	ClashSocket    string `json:"clash_socket,omitempty"`
-	Label          string `json:"label,omitempty"`
+	Mode              string `json:"mode"`
+	Address           string `json:"address"`
+	Username          string `json:"username,omitempty"`
+	Password          string `json:"password,omitempty"`
+	BypassVPN         *bool  `json:"bypass_vpn,omitempty"`
+	OutboundInterface string `json:"outbound_interface,omitempty"`
+	BackupMode        string `json:"backup_mode,omitempty"`
+	BackupAddress     string `json:"backup_address,omitempty"`
+	BackupUsername    string `json:"backup_username,omitempty"`
+	BackupPassword    string `json:"backup_password,omitempty"`
+	ClashSocket       string `json:"clash_socket,omitempty"`
+	Label             string `json:"label,omitempty"`
+}
+
+func (u UpstreamConfig) ShouldBypassVPN() bool {
+	if u.BypassVPN != nil {
+		return *u.BypassVPN
+	}
+	return true
 }
 
 type EgressConfig struct {
@@ -183,14 +192,16 @@ type Config struct {
 
 // RedactedUpstream hides secrets while preserving diagnostic visibility.
 type RedactedUpstream struct {
-	Mode           string `json:"mode"`
-	Address        string `json:"address"`
-	HasCredentials bool   `json:"has_credentials"`
-	BackupMode     string `json:"backup_mode,omitempty"`
-	BackupAddress  string `json:"backup_address,omitempty"`
-	HasBackupCreds bool   `json:"has_backup_credentials"`
-	ClashSocket    string `json:"clash_socket,omitempty"`
-	Label          string `json:"label,omitempty"`
+	Mode              string `json:"mode"`
+	Address           string `json:"address"`
+	HasCredentials    bool   `json:"has_credentials"`
+	BypassVPN         bool   `json:"bypass_vpn"`
+	OutboundInterface string `json:"outbound_interface,omitempty"`
+	BackupMode        string `json:"backup_mode,omitempty"`
+	BackupAddress     string `json:"backup_address,omitempty"`
+	HasBackupCreds    bool   `json:"has_backup_credentials"`
+	ClashSocket       string `json:"clash_socket,omitempty"`
+	Label             string `json:"label,omitempty"`
 }
 
 type RedactedConfig struct {
@@ -214,14 +225,16 @@ func (c *Config) Redacted() RedactedConfig {
 		ActiveProfile: c.ActiveProfile,
 		Listen:        c.Listen,
 		Upstream: RedactedUpstream{
-			Mode:           c.Upstream.Mode,
-			Address:        c.Upstream.Address,
-			HasCredentials: c.Upstream.Username != "" || c.Upstream.Password != "",
-			BackupMode:     c.Upstream.BackupMode,
-			BackupAddress:  c.Upstream.BackupAddress,
-			HasBackupCreds: c.Upstream.BackupUsername != "" || c.Upstream.BackupPassword != "",
-			ClashSocket:    c.Upstream.ClashSocket,
-			Label:          c.Upstream.Label,
+			Mode:              c.Upstream.Mode,
+			Address:           c.Upstream.Address,
+			HasCredentials:    c.Upstream.Username != "" || c.Upstream.Password != "",
+			BypassVPN:         c.Upstream.ShouldBypassVPN(),
+			OutboundInterface: c.Upstream.OutboundInterface,
+			BackupMode:        c.Upstream.BackupMode,
+			BackupAddress:     c.Upstream.BackupAddress,
+			HasBackupCreds:    c.Upstream.BackupUsername != "" || c.Upstream.BackupPassword != "",
+			ClashSocket:       c.Upstream.ClashSocket,
+			Label:             c.Upstream.Label,
 		},
 		Egress:     c.Egress,
 		Identity:   c.Identity,

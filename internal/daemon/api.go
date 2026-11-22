@@ -180,6 +180,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		"direct_leaks_count":  len(directHits),
 		"browser_pac":         host.InspectBrowserPAC(&cfg),
 		"service":             launcher.InspectLaunchAgentStatus(&cfg, true, os.Getpid()),
+		"upstream_route":      s.gateway.UpstreamRouteStatus(),
 		"storage":             collectStorageSummary(),
 		"remote":              remoteSt,
 	})
@@ -1227,6 +1228,8 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		UpstreamAddress       string   `json:"upstream_address"`
 		UpstreamUsername      string   `json:"upstream_username"`
 		UpstreamPassword      string   `json:"upstream_password"`
+		BypassVPN             *bool    `json:"bypass_vpn"`
+		OutboundInterface     *string  `json:"outbound_interface"`
 		ExpectedIP            string   `json:"expected_ip"`
 		AllowedCountries      []string `json:"allowed_countries"`
 		Language              string   `json:"language"`
@@ -1261,6 +1264,12 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.UpstreamPassword != "" {
 		next.Upstream.Password = body.UpstreamPassword
+	}
+	if body.BypassVPN != nil {
+		next.Upstream.BypassVPN = body.BypassVPN
+	}
+	if body.OutboundInterface != nil {
+		next.Upstream.OutboundInterface = strings.TrimSpace(*body.OutboundInterface)
 	}
 	next.Egress.ExpectedIP = strings.TrimSpace(body.ExpectedIP)
 	if body.AllowedCountries != nil {
@@ -1317,10 +1326,11 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	cancel()
 	go s.syncNativeBrowserShield()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":     true,
-		"config": next.Redacted(),
-		"probe":  res,
-		"gate":   s.gate.Snapshot(),
+		"ok":             true,
+		"config":         next.Redacted(),
+		"probe":          res,
+		"gate":           s.gate.Snapshot(),
+		"upstream_route": s.gateway.UpstreamRouteStatus(),
 	})
 }
 

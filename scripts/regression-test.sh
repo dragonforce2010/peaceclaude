@@ -562,6 +562,27 @@ else
   fail "api_service_autostart_contract" "/api/service/autostart contract check failed"
 fi
 
+# 16g. Verify /api/status.upstream_route and bypass_vpn toggle via /api/config/update
+BYPASS_OFF="$(curl -fsS -X POST "http://127.0.0.1:${CTRL_PORT}/api/config/update" -H 'Content-Type: application/json' -d '{"bypass_vpn":false}')"
+BYPASS_ON="$(curl -fsS -X POST "http://127.0.0.1:${CTRL_PORT}/api/config/update" -H 'Content-Type: application/json' -d '{"bypass_vpn":true}')"
+if python3 - "$STATUS_API_JSON" "$BYPASS_OFF" "$BYPASS_ON" <<'PY'
+import json, sys
+st = json.loads(sys.argv[1])
+off = json.loads(sys.argv[2])
+on = json.loads(sys.argv[3])
+ur = st.get("upstream_route", {})
+assert "bypass_enabled" in ur and "active_interface" in ur, st
+assert off.get("config", {}).get("upstream", {}).get("bypass_vpn") is False, off
+assert off.get("upstream_route", {}).get("bypass_enabled") is False, off
+assert on.get("config", {}).get("upstream", {}).get("bypass_vpn") is True, on
+assert on.get("upstream_route", {}).get("bypass_enabled") is True, on
+PY
+then
+  ok "api_upstream_route_and_bypass_vpn" "/api/status.upstream_route and /api/config/update bypass_vpn toggle verified"
+else
+  fail "api_upstream_route_and_bypass_vpn" "upstream_route or bypass_vpn API contract failed"
+fi
+
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes
 if ps -axo command= | grep -F "$TMP_HOME" | grep -qv grep; then
   fail "sandbox_zero_desktop_interference" "sandbox regression spawned unexpected process referencing $TMP_HOME"

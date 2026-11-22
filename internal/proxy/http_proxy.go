@@ -76,6 +76,17 @@ func (g *Gateway) WarmUpstream(ctx context.Context) {
 	}
 }
 
+// UpstreamRouteStatus reports the active upstream dialer's physical-interface binding / VPN-bypass state.
+func (g *Gateway) UpstreamRouteStatus() upstream.RouteSnapshot {
+	if g == nil {
+		return upstream.RouteSnapshot{ActiveInterface: "system-default", SkippedReason: "nil gateway"}
+	}
+	g.mu.RLock()
+	d := g.dialer
+	g.mu.RUnlock()
+	return d.RouteStatus()
+}
+
 func (g *Gateway) rebuildAllowedSubnetsLocked(cfg *config.Config) {
 	prefixes := []netip.Prefix{
 		netip.MustParsePrefix("127.0.0.0/8"),

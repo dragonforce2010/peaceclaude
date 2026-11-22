@@ -508,6 +508,7 @@
     renderRules(s.rules);
     renderPACStatus(s.browser_pac);
     renderServiceAutostart(s.service);
+    renderUpstreamRoute(s.upstream_route);
     renderStorageInfo(s.storage);
     populateSettings(s.config);
 
@@ -565,6 +566,24 @@
       desc.textContent = `检测到尚未注册或失效的 LaunchAgent（${svc.launch_agent_path || ''}）；点击右侧或打开 PeaceClaude.app 将自动补齐注册。`;
     }
     btn.textContent = '关闭开机自启';
+  }
+
+  function renderUpstreamRoute(ur) {
+    const tag = $('upstream-route-hint');
+    if (!tag || !ur) return;
+    if (ur.bound_physical && ur.active_interface) {
+      tag.className = 'status-tag pass';
+      tag.textContent = `出站 ${ur.active_interface} (已绕开 VPN)`;
+      tag.title = '直连外部静态代理已绑定物理出口网卡 (IP_BOUND_IF)，不影响公司内网与飞书走 VPN';
+    } else if (ur.using_fallback) {
+      tag.className = 'status-tag warn';
+      tag.textContent = '已回退系统路由';
+      tag.title = ur.fallback_reason || '物理网卡直连失败，已自动回退系统默认路由';
+    } else {
+      tag.className = 'status-tag';
+      tag.textContent = ur.active_interface === 'system-default' ? '系统默认路由' : (ur.active_interface || '系统路由');
+      tag.title = ur.skipped_reason || '';
+    }
   }
 
   function renderStorageInfo(st) {
@@ -1053,6 +1072,7 @@
     $('cfg-strip-host-env').checked = !!cfg.identity.strip_host_anthropic_env;
     $('cfg-corp-direct').checked = !!cfg.shield.allow_corporate_direct;
     if ($('cfg-proxy-auth-domains')) $('cfg-proxy-auth-domains').checked = !!cfg.shield.proxy_auth_domains;
+    if ($('cfg-bypass-vpn')) $('cfg-bypass-vpn').checked = cfg.upstream.bypass_vpn !== false;
     $('cfg-vm-proxy').checked = !!cfg.listen.vm_proxy_enabled;
     $('cfg-cred-hint').textContent = cfg.upstream.has_credentials ? '上游账密已加密存盘（界面不回显）' : '当前上游无认证凭据';
   }
@@ -1902,12 +1922,18 @@
     strip_host_anthropic_env: $('cfg-strip-host-env').checked,
     allow_corporate_direct: $('cfg-corp-direct').checked,
     proxy_auth_domains: $('cfg-proxy-auth-domains') ? $('cfg-proxy-auth-domains').checked : false,
+    bypass_vpn: $('cfg-bypass-vpn') ? $('cfg-bypass-vpn').checked : true,
     vm_proxy_enabled: $('cfg-vm-proxy').checked,
   });
   $('cfg-proxy-auth-domains')?.addEventListener('change', () => {
     saveConfigPayload(gatherAllSettings(), $('cfg-proxy-auth-domains').checked
       ? '已启用登录辅助域经静态 IP 代理，PAC 已热更新'
       : '已切换为严格仅 Claude 域名走静态 IP（Google 登录与其余网站直连）');
+  });
+  $('cfg-bypass-vpn')?.addEventListener('change', () => {
+    saveConfigPayload(gatherAllSettings(), $('cfg-bypass-vpn').checked
+      ? '已开启直连物理网卡绕开 VPN，并立即重测静态出口链路'
+      : '已切换为走系统默认路由（不再跳过公司 VPN）');
   });
   $('form-network').addEventListener('input', () => { populateSettings._dirty = true; });
   $('form-general').addEventListener('input', () => { populateSettings._dirty = true; });
