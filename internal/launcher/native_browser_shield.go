@@ -30,7 +30,9 @@ type NativeBrowserInfo struct {
 	ExtensionLoaded   bool     `json:"extension_loaded"`
 	ExtensionEnabled  bool     `json:"extension_enabled"`
 	LoadedProfiles    []string `json:"loaded_profiles,omitempty"`
-	ProtectionLevel   string   `json:"protection_level"` // "full" | "network_only" | "unprotected"
+	MissingProfiles   []string `json:"missing_profiles,omitempty"`
+	TotalProfiles     int      `json:"total_profiles,omitempty"`
+	ProtectionLevel   string   `json:"protection_level"` // "full" | "partial" | "network_only" | "unprotected"
 	Note              string   `json:"note"`
 }
 
@@ -910,10 +912,12 @@ func inspectNativeBrowsersWithRoots(cfg *config.Config, pac host.BrowserPACStatu
 
 		if spec.SupportsExtension && installed {
 			userDataDir := filepath.Join(homeDir, spec.UserDataRelPath)
-			loaded, enabled, profs := scanChromiumNativeShieldProfiles(userDataDir, extDir)
+			loaded, enabled, loadedProfs, missingProfs, totalProfs := scanChromiumNativeShieldProfiles(userDataDir, extDir)
 			info.ExtensionLoaded = loaded
 			info.ExtensionEnabled = enabled
-			info.LoadedProfiles = profs
+			info.LoadedProfiles = loadedProfs
+			info.MissingProfiles = missingProfs
+			info.TotalProfiles = totalProfs
 		}
 
 		switch {
@@ -928,15 +932,18 @@ func inspectNativeBrowsersWithRoots(cfg *config.Config, pac host.BrowserPACStatu
 				info.ProtectionLevel = "unprotected"
 				info.Note = "未开启系统 PAC；Safari 不支持扩展级指纹护航"
 			}
-		case pac.MatchesPeace && info.ExtensionEnabled:
+		case pac.MatchesPeace && info.ExtensionEnabled && len(info.MissingProfiles) == 0:
 			info.ProtectionLevel = "full"
-			info.Note = fmt.Sprintf("全链路已护航（PAC + 定向扩展已启用于 %s）", strings.Join(info.LoadedProfiles, ", "))
+			info.Note = fmt.Sprintf("全链路已护航（PAC + 定向扩展已启用于全部 %d 个配置档：%s）", max(1, len(info.LoadedProfiles)), strings.Join(info.LoadedProfiles, ", "))
+		case pac.MatchesPeace && info.ExtensionEnabled && len(info.MissingProfiles) > 0:
+			info.ProtectionLevel = "partial"
+			info.Note = fmt.Sprintf("已启用于 %d/%d 个配置档；Arc/Chrome 扩展按 Profile/Space 隔离，如常用 Space 未覆盖需切换到该 Space 补载", len(info.LoadedProfiles), info.TotalProfiles)
 		case pac.MatchesPeace && info.ExtensionLoaded:
 			info.ProtectionLevel = "network_only"
 			info.Note = fmt.Sprintf("网络层 PAC 已护航；扩展已在 %s 载入但处于禁用状态，请在扩展页启用", strings.Join(info.LoadedProfiles, ", "))
 		case pac.MatchesPeace:
 			info.ProtectionLevel = "network_only"
-			info.Note = "仅网络层 PAC 已护航（静态 IP）；点击「打开目录并引导载入」即可补齐时区/语言/字体护航"
+			info.Note = "仅网络层 PAC 已护航（静态 IP）；受 Chromium 安全限制，单纯重启浏览器不会自动加载扩展，请点下方按钮并把目录拖进扩展页（10 秒完成，永久生效）"
 		case info.ExtensionEnabled:
 			info.ProtectionLevel = "unprotected"
 			info.Note = "扩展已载入，但系统浏览器 PAC 未开启（存在直连风险），请勾选并开启护航"
@@ -962,22 +969,66 @@ func findBrowserAppPath(appsDir, homeDir, appBundle string) string {
 	return ""
 }
 
-func scanChromiumNativeShieldProfiles(userDataDir, extDir string) (loaded, enabled bool, profiles []string) {
-	entries, err := os.ReadDir(userDataDir)
-	if err != nil {
-		return false, false, nil
+// isChromiumExtensionEntryEnabled interprets Chromium's extensions.settings entry across
+// legacy (`state: 1, disable_reasons: 0`) and Chromium 149+/Arc 158+ (`state` omitted, `disable_reasons: []` or `[8192]`).
+func isChromiumExtensionEntryEnabled(entry map[string]any) bool {
+	if entry == nil {
+		return false
 	}
-	cleanExt := filepath.Clean(extDir)
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	if stateNum, hasState := entry["state"].(float64); hasState {
+		if int(stateNum) == 0 {
+			return false
 		}
-		name := e.Name()
-		if name != "Default" && !strings.HasPrefix(name, "Profile ") {
-			continue
+	}
+	switch reasons := entry["disable_reasons"].(type) {
+	case []any:
+		if len(reasons) > 0 {
+			return false
 		}
-		prefsPath := filepath.Join(userDataDir, name, "Preferences")
-		raw, err := os.ReadFile(prefsPath)
+	case float64:
+		if int(reasons) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func readChromiumProfileDisplayNames(userDataDir string) map[string]string {
+	out := map[string]string{}
+	raw, err := os.ReadFile(filepath.Join(userDataDir, "Local State"))
+	if err != nil || len(raw) == 0 {
+		return out
+	}
+	var doc struct {
+		Profile struct {
+			InfoCache map[string]struct {
+				Name string `json:"name"`
+			} `json:"info_cache"`
+		} `json:"profile"`
+	}
+	if json.Unmarshal(raw, &doc) != nil {
+		return out
+	}
+	for dirName, meta := range doc.Profile.InfoCache {
+		if strings.TrimSpace(meta.Name) != "" {
+			out[dirName] = strings.TrimSpace(meta.Name)
+		}
+	}
+	return out
+}
+
+func formatChromiumProfileLabel(dirName string, displayNames map[string]string) string {
+	disp := strings.TrimSpace(displayNames[dirName])
+	if disp == "" || strings.EqualFold(disp, dirName) {
+		return dirName
+	}
+	return fmt.Sprintf("%s (%s)", dirName, disp)
+}
+
+func inspectProfileExtensionFiles(profDir, cleanExt string) (foundLoaded, foundEnabled bool) {
+	// Chromium 149+ & Arc 158+ store extension settings primarily in Secure Preferences.
+	for _, fn := range []string{"Secure Preferences", "Preferences"} {
+		raw, err := os.ReadFile(filepath.Join(profDir, fn))
 		if err != nil || len(raw) == 0 {
 			continue
 		}
@@ -1001,21 +1052,64 @@ func scanChromiumNativeShieldProfiles(userDataDir, extDir string) (loaded, enabl
 			if !matchPath && !matchName {
 				continue
 			}
-			loaded = true
-			if stateNum, hasState := entry["state"].(float64); hasState {
-				if int(stateNum) == 1 {
-					enabled = true
-				}
-			} else if reasons, _ := entry["disable_reasons"].(float64); reasons == 0 {
-				enabled = true
-			}
-			if !slices.Contains(profiles, name) {
-				profiles = append(profiles, name)
+			foundLoaded = true
+			if isChromiumExtensionEntryEnabled(entry) {
+				foundEnabled = true
 			}
 		}
 	}
-	sort.Strings(profiles)
-	return loaded, enabled, profiles
+	return foundLoaded, foundEnabled
+}
+
+func scanChromiumNativeShieldProfiles(userDataDir, extDir string) (loaded, enabled bool, loadedProfs, missingProfs []string, totalProfs int) {
+	entries, err := os.ReadDir(userDataDir)
+	if err != nil {
+		return false, false, nil, nil, 0
+	}
+	displayNames := readChromiumProfileDisplayNames(userDataDir)
+	cleanExt := filepath.Clean(extDir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name != "Default" && !strings.HasPrefix(name, "Profile ") {
+			continue
+		}
+		// Skip Arc internal hidden system profile (__ARC_SYSTEM_PROFILE).
+		if strings.HasPrefix(displayNames[name], "__ARC_") {
+			continue
+		}
+		profDir := filepath.Join(userDataDir, name)
+		hasSec := false
+		if _, err := os.Stat(filepath.Join(profDir, "Secure Preferences")); err == nil {
+			hasSec = true
+		}
+		hasPref := false
+		if _, err := os.Stat(filepath.Join(profDir, "Preferences")); err == nil {
+			hasPref = true
+		}
+		if !hasSec && !hasPref {
+			continue
+		}
+		totalProfs++
+		label := formatChromiumProfileLabel(name, displayNames)
+		profLoaded, profEnabled := inspectProfileExtensionFiles(profDir, cleanExt)
+		if profLoaded {
+			loaded = true
+			if !slices.Contains(loadedProfs, label) {
+				loadedProfs = append(loadedProfs, label)
+			}
+		}
+		if profEnabled {
+			enabled = true
+		} else if !slices.Contains(missingProfs, label) {
+			missingProfs = append(missingProfs, label)
+		}
+	}
+	sort.Strings(loadedProfs)
+	sort.Strings(missingProfs)
+	return loaded, enabled, loadedProfs, missingProfs, totalProfs
 }
 
 // OpenNativeBrowserExtensionGuide ensures extension files exist, reveals the unpacked folder in Finder,
@@ -1058,10 +1152,11 @@ func OpenNativeBrowserExtensionGuide(browserID, extDir string) (GuideResult, err
 	}
 
 	res.Steps = []string{
-		fmt.Sprintf("在 %s 地址栏粘贴并打开 %s，开启右上角「开发者模式」", spec.Name, spec.ExtensionsURL),
-		fmt.Sprintf("点击「加载已解压的扩展程序」，选择 Finder 已高亮选中的目录：%s", extDir),
-		"切回本控制台点「刷新检测状态」，即刻显示为「全链路已护航」，仅对 Claude 域名与 fuck-claude.app 生效",
+		fmt.Sprintf("若使用 %s 多 Space / 多配置档，请先切到你平时访问 Claude 与 fuck-claude.app 的那个 Space（不同 Space 扩展互不共享）", spec.Name),
+		fmt.Sprintf("在地址栏按 Cmd+L 粘贴并打开 %s（已为你自动复制），开启右上角「开发者模式 (Developer mode)」", spec.ExtensionsURL),
+		fmt.Sprintf("最省事方式：直接把 Finder 已高亮选中的 native-browser-shield 文件夹拖入扩展页空白处即载入（因 .peaceclaude 默认隐藏，若点「加载已解压的扩展程序」，请在文件弹窗按 Cmd+Shift+G 粘贴：%s）", extDir),
+		"切回本控制台点击「刷新检测状态」变成「全链路已护航」，随后回到 fuck-claude.app 点 RESCAN 即可达成 2/100 LOW RISK",
 	}
-	res.Message = fmt.Sprintf("已在 Finder 高亮打开 %s（并尝试唤醒 %s）；扩展管理页地址为 %s", extDir, spec.Name, spec.ExtensionsURL)
+	res.Message = fmt.Sprintf("已在 Finder 高亮打开 %s；请将该文件夹拖入 %s 的「开发者模式」页面（单纯重启浏览器不会自动加载）", extDir, spec.ExtensionsURL)
 	return res, nil
 }

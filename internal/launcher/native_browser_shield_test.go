@@ -256,3 +256,99 @@ func TestInspectNativeBrowsersWithRoots(t *testing.T) {
 		t.Fatalf("expected safari=network_only without extension support, got %+v", byID["safari"])
 	}
 }
+
+
+func TestInspectNativeBrowsersSecurePreferencesAndDisableReasons(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PEACECLAUDE_HOME", filepath.Join(home, ".peaceclaude"))
+	apps := filepath.Join(home, "ApplicationsRoot")
+	for _, app := range []string{"Arc.app", "Google Chrome.app"} {
+		if err := os.MkdirAll(filepath.Join(apps, app), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	extDir := config.NativeBrowserShieldDir()
+	arcUserData := filepath.Join(home, "Library/Application Support/Arc/User Data")
+	chromeUserData := filepath.Join(home, "Library/Application Support/Google/Chrome")
+	arcDef := filepath.Join(arcUserData, "Default")
+	arcP1 := filepath.Join(arcUserData, "Profile 1")
+	arcSys := filepath.Join(arcUserData, "Profile 2")
+	chromeDef := filepath.Join(chromeUserData, "Default")
+	for _, dir := range []string{arcDef, arcP1, arcSys, chromeDef} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	localState := `{
+  "profile": {
+    "info_cache": {
+      "Default": {"name": "Work Space"},
+      "Profile 1": {"name": "Personal"},
+      "Profile 2": {"name": "__ARC_SYSTEM_PROFILE"}
+    }
+  }
+}`
+	_ = os.WriteFile(filepath.Join(arcUserData, "Local State"), []byte(localState), 0o600)
+
+	// Arc Default: Preferences empty, Secure Preferences has enabled shield (omits state, disable_reasons=[]).
+	_ = os.WriteFile(filepath.Join(arcDef, "Preferences"), []byte(`{"extensions":{"settings":{}}}`), 0o600)
+	arcSecDef, _ := json.Marshal(map[string]any{
+		"extensions": map[string]any{
+			"settings": map[string]any{
+				"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": map[string]any{
+					"location":        4,
+					"path":            extDir,
+					"disable_reasons": []int{},
+					"manifest":        map[string]any{"name": "PeaceClaude Native Shield"},
+				},
+			},
+		},
+	})
+	_ = os.WriteFile(filepath.Join(arcDef, "Secure Preferences"), arcSecDef, 0o600)
+	// Arc Profile 1: Secure Preferences does not have shield yet.
+	_ = os.WriteFile(filepath.Join(arcP1, "Secure Preferences"), []byte(`{"extensions":{"settings":{}}}`), 0o600)
+	// Arc Profile 2 (__ARC_SYSTEM_PROFILE): must be excluded from totals & missing_profiles.
+	_ = os.WriteFile(filepath.Join(arcSys, "Secure Preferences"), []byte(`{"extensions":{"settings":{}}}`), 0o600)
+
+	// Chrome Default: loaded in Secure Preferences, but disabled (disable_reasons: [8192]).
+	chromeSec, _ := json.Marshal(map[string]any{
+		"extensions": map[string]any{
+			"settings": map[string]any{
+				"cccccccccccccccccccccccccccccccc": map[string]any{
+					"location":        4,
+					"path":            extDir,
+					"disable_reasons": []int{8192},
+					"manifest":        map[string]any{"name": "PeaceClaude Native Shield"},
+				},
+			},
+		},
+	})
+	_ = os.WriteFile(filepath.Join(chromeDef, "Secure Preferences"), chromeSec, 0o600)
+
+	cfg := config.Default()
+	cfg.Shield.ProtectedBrowsers = []string{"arc", "chrome"}
+	pac := host.BrowserPACStatus{MatchesPeace: true}
+	rep := inspectNativeBrowsersWithRoots(cfg, pac, egress.GateSnapshot{EffectiveTimezone: "America/Denver"}, apps, home)
+
+	byID := map[string]NativeBrowserInfo{}
+	for _, b := range rep.Browsers {
+		byID[b.ID] = b
+	}
+	arc := byID["arc"]
+	if !arc.ExtensionLoaded || !arc.ExtensionEnabled || arc.ProtectionLevel != "partial" {
+		t.Fatalf("expected arc partial protection, got %+v", arc)
+	}
+	if arc.TotalProfiles != 2 || len(arc.LoadedProfiles) != 1 || arc.LoadedProfiles[0] != "Default (Work Space)" {
+		t.Fatalf("expected Arc 2 real profiles (1 loaded Default (Work Space)), got total=%d loaded=%v missing=%v", arc.TotalProfiles, arc.LoadedProfiles, arc.MissingProfiles)
+	}
+	if len(arc.MissingProfiles) != 1 || arc.MissingProfiles[0] != "Profile 1 (Personal)" {
+		t.Fatalf("expected missing=[Profile 1 (Personal)] excluding __ARC_SYSTEM_PROFILE, got %v", arc.MissingProfiles)
+	}
+
+	chrome := byID["chrome"]
+	if !chrome.ExtensionLoaded || chrome.ExtensionEnabled || chrome.ProtectionLevel != "network_only" {
+		t.Fatalf("expected disabled chrome extension (disable_reasons=[8192]) to report loaded=true enabled=false level=network_only, got %+v", chrome)
+	}
+}

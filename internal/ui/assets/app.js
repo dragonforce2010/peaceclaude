@@ -1166,6 +1166,13 @@
 
   let nativeBrowsersData = null;
   let lastGuideExtURL = '';
+  let lastGuideBrowserID = '';
+
+  function summarizeProfileList(profs) {
+    if (!profs || profs.length === 0) return '';
+    if (profs.length <= 3) return profs.join(', ');
+    return `${profs.slice(0, 3).join(', ')} 等共 ${profs.length} 个`;
+  }
 
   function renderNativeBrowsers(rep) {
     nativeBrowsersData = rep;
@@ -1194,6 +1201,9 @@
       if (b.protection_level === 'full') {
         stClass = 'pass';
         stText = '全链路已护航';
+      } else if (b.protection_level === 'partial') {
+        stClass = 'warn';
+        stText = `部分配置档已护航 (${(b.loaded_profiles || []).length}/${b.total_profiles || (b.loaded_profiles || []).length})`;
       } else if (b.protection_level === 'network_only') {
         stClass = b.supports_extension ? 'warn' : 'muted-tag';
         stText = b.supports_extension ? '仅网络层 · 待载入扩展' : '仅支持网络层 PAC';
@@ -1201,11 +1211,19 @@
         stClass = 'muted-tag';
         stText = '未安装';
       }
-      const profs = (b.loaded_profiles && b.loaded_profiles.length)
-        ? `<div class="nb-card-profs">已生效配置档：<code>${esc(b.loaded_profiles.join(', '))}</code></div>`
-        : '';
+      const loadedSummary = summarizeProfileList(b.loaded_profiles);
+      const missingSummary = summarizeProfileList(b.missing_profiles);
+      const profLines = [];
+      if (loadedSummary) {
+        profLines.push(`<div class="nb-card-profs" title="${esc((b.loaded_profiles || []).join('\n'))}">已生效配置档：<code>${esc(loadedSummary)}</code></div>`);
+      }
+      if (missingSummary && (b.protection_level === 'partial' || !b.extension_enabled)) {
+        profLines.push(`<div class="nb-card-profs" title="${esc((b.missing_profiles || []).join('\n'))}">待加载配置档：<code>${esc(missingSummary)}</code></div>`);
+      }
+      const profs = profLines.join('');
+      const guideBtnLabel = b.protection_level === 'full' ? '查看扩展目录' : (b.protection_level === 'partial' ? '补载其余 Space / 配置档' : '打开目录并引导载入');
       const guideBtn = b.installed && b.supports_extension
-        ? `<button type="button" class="btn btn-secondary btn-sm" data-nb-guide="${esc(b.id)}">${b.extension_enabled ? '查看扩展目录' : '打开目录并引导载入'}</button>`
+        ? `<button type="button" class="btn btn-secondary btn-sm" data-nb-guide="${esc(b.id)}">${guideBtnLabel}</button>`
         : `<span class="muted" style="font-size:11.5px;">${b.supports_extension ? '请先安装此浏览器' : '不支持 Chromium 扩展'}</span>`;
 
       return `
@@ -1924,6 +1942,28 @@
     toast(res.message || (want ? '已开启开机自启守护' : '已关闭开机自启守护'), 'ok');
   }));
 
+  async function openNativeBrowserGuide(browserID, showToast = true) {
+    lastGuideBrowserID = browserID;
+    const res = await api('/api/native-browsers/guide', {
+      method: 'POST',
+      body: JSON.stringify({ browser_id: browserID }),
+    });
+    lastGuideExtURL = res.extensions_url || '';
+    if (lastGuideExtURL) {
+      try { await navigator.clipboard.writeText(lastGuideExtURL); } catch {}
+    }
+    const box = $('nb-guide-box');
+    if (box) {
+      $('nb-guide-title').textContent = `${res.browser_name || browserID} 定向护航扩展加载指引（只需一次性拖入，重启不会自动加载）`;
+      $('nb-guide-steps').innerHTML = (res.steps || []).map((s) => `<li>${esc(s)}</li>`).join('');
+      box.classList.remove('hidden');
+    }
+    if (showToast) {
+      toast(res.message + (lastGuideExtURL ? `（已复制 ${lastGuideExtURL}）` : ''), 'ok');
+    }
+    return res;
+  }
+
   // Native Browser Multi-Select Protection Events
   $('nb-browser-grid')?.addEventListener('change', (ev) => {
     const cb = ev.target.closest('.nb-browser-cb');
@@ -1934,32 +1974,22 @@
     const btn = ev.target.closest('button[data-nb-guide]');
     if (!btn) return;
     const browserID = btn.dataset.nbGuide;
-    await withBtnBusy(btn, '打开中…', async () => {
-      const res = await api('/api/native-browsers/guide', {
-        method: 'POST',
-        body: JSON.stringify({ browser_id: browserID }),
-      });
-      lastGuideExtURL = res.extensions_url || '';
-      if (lastGuideExtURL) {
-        try { await navigator.clipboard.writeText(lastGuideExtURL); } catch {}
-      }
-      const box = $('nb-guide-box');
-      if (box) {
-        $('nb-guide-title').textContent = `${res.browser_name || browserID} 定向护航扩展加载指引`;
-        $('nb-guide-steps').innerHTML = (res.steps || []).map((s) => `<li>${esc(s)}</li>`).join('');
-        box.classList.remove('hidden');
-      }
-      toast(res.message + (lastGuideExtURL ? `（已复制 ${lastGuideExtURL}）` : ''), 'ok');
-    });
+    await withBtnBusy(btn, '打开中…', () => openNativeBrowserGuide(browserID, true));
   });
   $('btn-nb-refresh')?.addEventListener('click', () => withBtnBusy($('btn-nb-refresh'), '检测中…', async () => {
     await loadNativeBrowsers();
     toast('原生浏览器护航状态已刷新', 'ok');
   }));
-  $('btn-nb-copy-path')?.addEventListener('click', async () => {
+  const copyExtDirPath = async () => {
     const p = nativeBrowsersData?.extension_dir || '~/.peaceclaude/extensions/native-browser-shield';
     try { await navigator.clipboard.writeText(p); toast('已复制扩展目录: ' + p, 'ok'); } catch { toast(p); }
-  });
+  };
+  $('btn-nb-copy-path')?.addEventListener('click', copyExtDirPath);
+  $('btn-nb-copy-path-guide')?.addEventListener('click', copyExtDirPath);
+  $('btn-nb-open-finder')?.addEventListener('click', () => withBtnBusy($('btn-nb-open-finder'), '打开中…', async () => {
+    const id = lastGuideBrowserID || (nativeBrowsersData?.browsers || []).find((b) => b.installed && b.supports_extension)?.id || 'arc';
+    await openNativeBrowserGuide(id, true);
+  }));
   $('btn-nb-copy-exturl')?.addEventListener('click', async () => {
     if (!lastGuideExtURL) return;
     try { await navigator.clipboard.writeText(lastGuideExtURL); toast('已复制扩展管理页地址: ' + lastGuideExtURL, 'ok'); } catch { toast(lastGuideExtURL); }
@@ -1973,9 +2003,12 @@
     });
     if (res.report) renderNativeBrowsers(res.report);
     await refreshAll();
-    const pendingExt = (res.report?.browsers || []).filter((b) => selected.includes(b.id) && b.supports_extension && !b.extension_enabled);
+    const pendingExt = (res.report?.browsers || []).filter(
+      (b) => selected.includes(b.id) && b.supports_extension && b.protection_level !== 'full'
+    );
     if (pendingExt.length > 0) {
-      toast(`已开启系统 PAC（${selected.length} 项）！请为 ${pendingExt.map((b) => b.name).join(' / ')} 点击「打开目录并引导载入」完成一次扩展加载`, 'ok');
+      await openNativeBrowserGuide(pendingExt[0].id, false);
+      toast(`PAC 已开启！注意单纯重启浏览器不会自动加载扩展，请按下方指引把目录拖入 ${pendingExt[0].extensions_url || '扩展页'}`, 'warn');
     } else {
       toast('所选原生浏览器已处于全链路护航状态！', 'ok');
     }
