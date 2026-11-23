@@ -94,6 +94,8 @@ func run(args []string) error {
 		return cmdClean(rest)
 	case "vm-proxy", "pf":
 		return cmdVMProxy(rest)
+	case "remote":
+		return cmdRemote(rest)
 	case "config":
 		return cmdConfig(rest)
 	case "lock":
@@ -130,7 +132,8 @@ func printUsage() {
   clean [--profile P] [--dry-run] [--yes]        可恢复指纹清理（自动备份，保留配置与 skills）
 
 守护服务与安全门禁:
-  service [start|stop|restart|status|ensure-autostart|run]  管理后台 Fail-Closed 本地安全网关 (HTTP/SOCKS5/PAC/LaunchAgent)
+  service [start|stop|restart|status|install|ensure-autostart|run]  管理后台 Fail-Closed 本地安全网关 (HTTP/SOCKS5/PAC/自启)
+  remote [status|enable|disable|pair]            管理手机端 PeaceSwitch 配对监听与一次性 QR 凭证
   lock [reason]                                  立即紧急熔断（阻断一切出站并切断活跃连接）
   unlock                                         解除手动熔断并立即重检静态 IP 出口
   config [show|set-upstream|import-clash|gateway|set]  管理 Webshare / Clash 静态 IP 上游与测速
@@ -521,7 +524,7 @@ func cmdService(args []string) error {
 		fmt.Printf("✔ PeaceClaude 安全网关已运行 (PID=%d)\n  HTTP 代理:   %s\n  SOCKS5 代理: %s\n  Web 控制台:  %s\n",
 			st.PID, st.HTTPProxyURL, st.SOCKS5ProxyURL, st.ControlURL)
 		return nil
-	case "ensure-autostart":
+	case "install", "ensure-autostart":
 		self := selfBinary()
 		res, err := launcher.EnsureLaunchAgent(cfg, self, *ifEnabled)
 		if err != nil {
@@ -583,7 +586,142 @@ func cmdService(args []string) error {
 			state, st.LaunchAgentSet, st.LaunchAgentLoaded, st.LaunchAgentValid, st.AutoStartEnabled, st.LaunchAgentPath, st.HTTPProxyURL, st.SOCKS5ProxyURL, st.ControlURL)
 		return nil
 	default:
-		return fmt.Errorf("未知 service 子命令 %q (可用: start|stop|restart|status|ensure-autostart|run)", sub)
+		return fmt.Errorf("未知 service 子命令 %q (可用: start|stop|restart|status|install|ensure-autostart|run)", sub)
+	}
+}
+
+func cmdRemote(args []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	sub := "status"
+	rest := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub = args[0]
+		rest = args[1:]
+	}
+	switch sub {
+	case "status":
+		fs := flag.NewFlagSet("remote status", flag.ContinueOnError)
+		asJSON := fs.Bool("json", false, "输出 JSON")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		if ok, _ := launcher.DaemonHealth(cfg); ok {
+			raw, err := daemonGet(cfg, "/api/remote")
+			if err == nil {
+				if *asJSON {
+					fmt.Println(string(raw))
+					return nil
+				}
+				var st map[string]any
+				if json.Unmarshal(raw, &st) == nil {
+					fmt.Printf("远程伴侣接入: enabled=%v relay_mode=%v mobile_port=%v listen=%v\n",
+						st["enabled"], st["relay_mode"], st["mobile_port"], st["listen_addr"])
+					if addrs, ok := st["host_addresses"].([]any); ok && len(addrs) > 0 {
+						for _, item := range addrs {
+							if m, ok := item.(map[string]any); ok {
+								fmt.Printf("  - 可连地址 (%v): %v:%v [%v]\n", m["kind"], m["ip"], st["mobile_port"], m["interface"])
+							}
+						}
+					}
+					return nil
+				}
+			}
+		}
+		if *asJSON {
+			printJSON(map[string]any{
+				"enabled":     cfg.Remote.Enabled,
+				"relay_mode":  cfg.Remote.RelayMode,
+				"mobile_port": cfg.Remote.MobilePort,
+				"running":     false,
+			})
+			return nil
+		}
+		fmt.Printf("远程伴侣配置: enabled=%t relay_mode=%s mobile_port=%d (守护进程未运行)\n",
+			cfg.Remote.Enabled, nonEmpty(cfg.Remote.RelayMode, "lan"), cfg.Remote.MobilePort)
+		return nil
+	case "enable":
+		fs := flag.NewFlagSet("remote enable", flag.ContinueOnError)
+		mode := fs.String("mode", nonEmpty(cfg.Remote.RelayMode, "lan"), "接入模式: lan | custom")
+		port := fs.Int("port", cfg.Remote.MobilePort, "手机端监听端口")
+		relayURL := fs.String("relay-url", cfg.Remote.CustomRelayURL, "custom 模式下的 HTTPS 中继地址")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		m := strings.ToLower(strings.TrimSpace(*mode))
+		if m != "lan" && m != "custom" {
+			return fmt.Errorf("无效 remote 模式 %q（支持 lan 或 custom）", *mode)
+		}
+		if *port <= 0 {
+			*port = 18900
+		}
+		cfg.Remote.Enabled = true
+		cfg.Remote.RelayMode = m
+		cfg.Remote.MobilePort = *port
+		if strings.TrimSpace(*relayURL) != "" {
+			cfg.Remote.CustomRelayURL = strings.TrimSpace(*relayURL)
+		}
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+		if ok, _ := launcher.DaemonHealth(cfg); ok {
+			payload := map[string]any{
+				"enabled":          true,
+				"relay_mode":       m,
+				"mobile_port":      *port,
+				"custom_relay_url": cfg.Remote.CustomRelayURL,
+			}
+			if _, err := daemonPost(cfg, "/api/remote/relay", payload); err != nil {
+				return err
+			}
+			fmt.Printf("✔ 已开启远程伴侣接入并热生效 (mode=%s, port=%d)\n", m, *port)
+			return nil
+		}
+		fmt.Printf("✔ 已保存远程伴侣配置 (mode=%s, port=%d)；请执行 `peaceclaude service start` 启动网关。\n", m, *port)
+		return nil
+	case "disable":
+		cfg.Remote.Enabled = false
+		if err := config.Save(cfg); err != nil {
+			return err
+		}
+		if ok, _ := launcher.DaemonHealth(cfg); ok {
+			if _, err := daemonPost(cfg, "/api/remote/relay", map[string]any{"enabled": false}); err != nil {
+				return err
+			}
+		}
+		fmt.Println("✔ 已关闭手机端远程接入")
+		return nil
+	case "pair":
+		fs := flag.NewFlagSet("remote pair", flag.ContinueOnError)
+		hostOverride := fs.String("host", "", "指定二维码内主机 IP/域名")
+		asJSON := fs.Bool("json", false, "输出 JSON")
+		if err := fs.Parse(rest); err != nil {
+			return err
+		}
+		raw, err := daemonPost(cfg, "/api/remote/pair", map[string]any{"host": strings.TrimSpace(*hostOverride)})
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			fmt.Println(string(raw))
+			return nil
+		}
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			fmt.Println(string(raw))
+			return nil
+		}
+		if ticket, ok := out["ticket"].(map[string]any); ok {
+			fmt.Printf("✔ 已签发 120 秒一次性配对凭证:\n  配对链接: %v\n  配对码:   %v\n  过期时间: %v\n",
+				ticket["url"], ticket["code"], ticket["expires_at"])
+			return nil
+		}
+		fmt.Println(string(raw))
+		return nil
+	default:
+		return fmt.Errorf("未知 remote 子命令 %q (可用: status|enable|disable|pair)", sub)
 	}
 }
 
@@ -1521,6 +1659,24 @@ func cmdUninstall(args []string) error {
 	}
 	fmt.Println("✔ PeaceClaude 服务与桌面入口已卸载。")
 	return nil
+}
+
+func daemonGet(cfg *config.Config, path string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, cfg.ControlURL()+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("无法连接守护进程 (%s): %w", cfg.ControlURL(), err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	return raw, nil
 }
 
 func daemonPost(cfg *config.Config, path string, payload any) ([]byte, error) {

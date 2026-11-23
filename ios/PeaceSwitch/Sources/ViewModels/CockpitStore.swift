@@ -39,6 +39,8 @@ final class CockpitStore: ObservableObject {
     @Published private(set) var state: PeaceState = DemoStateEngine.initialState()
     @Published private(set) var isLoading: Bool = false
     @Published private(set) var isBusyAction: Bool = false
+    @Published private(set) var isOffline: Bool = false
+    @Published private(set) var lastSyncedAt: Date?
     @Published var errorMessage: String?
     @Published var toastMessage: String?
     @Published var language: AppLanguage {
@@ -51,6 +53,8 @@ final class CockpitStore: ObservableObject {
     private let apiClient = PeaceAPIClient()
     private var pollTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
+    private var stateRevision: Int = 0
+    private var consecutivePollFails: Int = 0
 
     init() {
         if let savedLang = UserDefaults.standard.string(forKey: Self.langDefaultsKey),
@@ -140,9 +144,23 @@ final class CockpitStore: ObservableObject {
                 code: payload.pairCode,
                 deviceName: deviceName
             )
-            KeychainStore.save(record)
-            let fetched = try await apiClient.fetchState(record: record, forceProbe: false)
-            state = fetched
+            guard KeychainStore.save(record) else {
+                errorMessage = tr(
+                    "无法将设备令牌安全写入系统 Keychain，请检查设备解锁状态后重试。",
+                    "Failed to save pairing token into iOS Keychain."
+                )
+                hapticError()
+                return
+            }
+            if let fetched = try? await apiClient.fetchState(record: record, forceProbe: false) {
+                state = fetched
+                isOffline = false
+                lastSyncedAt = Date()
+            } else {
+                // 配对令牌已生效，若初次拉取瞬断则直接进入工作台并触发重试横幅
+                isOffline = true
+            }
+            stateRevision &+= 1
             mode = .connected(record)
             startPollingIfNeeded()
             hapticSuccess()
@@ -157,6 +175,10 @@ final class CockpitStore: ObservableObject {
         stopPolling()
         KeychainStore.clear()
         errorMessage = nil
+        isOffline = false
+        consecutivePollFails = 0
+        lastSyncedAt = nil
+        stateRevision &+= 1
         state = DemoStateEngine.initialState()
         mode = .onboarding
         showToast(tr("已解除本地配对", "Unpaired from workstation"))
@@ -170,19 +192,28 @@ final class CockpitStore: ObservableObject {
             if forceProbe {
                 isLoading = true
                 try? await Task.sleep(for: .milliseconds(250))
+                stateRevision &+= 1
                 state = DemoStateEngine.apply(action: ActionRequest(action: "check_gate"), to: state)
+                lastSyncedAt = Date()
                 isLoading = false
                 hapticTap()
                 showToast(tr("演示出口测速完成", "Demo egress probe finished"))
             }
         case .connected(let record):
+            if silent && isBusyAction { return }
+            let startRevision = stateRevision
             if !silent { isLoading = true }
             defer {
                 if !silent { isLoading = false }
             }
             do {
                 let latest = try await apiClient.fetchState(record: record, forceProbe: forceProbe)
+                // 防止过期轮询覆盖刚刚触发的操作响应
+                if silent && startRevision != stateRevision { return }
                 state = latest
+                isOffline = false
+                consecutivePollFails = 0
+                lastSyncedAt = Date()
                 if !silent { errorMessage = nil }
                 if forceProbe {
                     hapticTap()
@@ -191,6 +222,7 @@ final class CockpitStore: ObservableObject {
             } catch PeaceAPIError.unauthorized {
                 stopPolling()
                 KeychainStore.clear()
+                isOffline = false
                 mode = .onboarding
                 errorMessage = tr(
                     "设备令牌已被电脑端撤销或失效，请重新扫码配对。",
@@ -198,6 +230,10 @@ final class CockpitStore: ObservableObject {
                 )
                 hapticError()
             } catch {
+                consecutivePollFails += 1
+                if !silent || consecutivePollFails >= 2 {
+                    isOffline = true
+                }
                 if !silent {
                     errorMessage = error.localizedDescription
                 }
@@ -278,17 +314,24 @@ final class CockpitStore: ObservableObject {
             return
         case .demo:
             isBusyAction = true
+            stateRevision &+= 1
             try? await Task.sleep(for: .milliseconds(180))
             state = DemoStateEngine.apply(action: payload, to: state)
+            lastSyncedAt = Date()
             isBusyAction = false
             hapticTap()
             showToast(toast)
         case .connected(let record):
             isBusyAction = true
+            stateRevision &+= 1
             defer { isBusyAction = false }
             do {
                 let updated = try await apiClient.performAction(record: record, payload: payload)
+                stateRevision &+= 1
                 state = updated
+                isOffline = false
+                consecutivePollFails = 0
+                lastSyncedAt = Date()
                 hapticSuccess()
                 showToast(toast)
             } catch PeaceAPIError.unauthorized {

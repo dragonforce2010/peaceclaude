@@ -45,6 +45,27 @@ struct MainTabView: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(PeaceTheme.navy)
+                } else if store.isOffline {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi.slash")
+                            .font(.caption.weight(.bold))
+                        Text(store.tr("暂与电脑端失联，正在后台自动重连…",
+                                      "Workstation unreachable, retrying…"))
+                            .font(.caption.weight(.medium))
+                            .lineLimit(1)
+                        Spacer()
+                        Button(store.tr("立即重连", "Retry")) {
+                            Task { await store.refresh(forceProbe: false, silent: false) }
+                        }
+                        .font(.caption.weight(.bold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(.white.opacity(0.24), in: Capsule())
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(PeaceTheme.amber)
                 }
 
                 if let toast = store.toastMessage {

@@ -39,6 +39,21 @@
 
 ---
 
+## 方案 C：Netlify CLI 一键托管（当前线上示例站使用，主仓永久私有）
+
+当前测试线上官网已托管在 [https://peaceclaude-hub.netlify.app](https://peaceclaude-hub.netlify.app)（站点 ID `0444afef-3945-49ef-ba7c-dd0068ff5a36`）。任何官网改动都可通过以下命令从 `/tmp`（不污染工作区）秒级同步上线：
+
+```bash
+cd /tmp && netlify deploy --prod \
+  --dir=/path/to/peaceclaude/website \
+  --site=0444afef-3945-49ef-ba7c-dd0068ff5a36 \
+  --message="Update PeaceClaude website"
+```
+
+绑定自定义域名 `peace-claude.app`：打开 [Netlify 项目域名设置](https://app.netlify.com/projects/peaceclaude-hub) -> `Domain management` -> `Add a domain` 填入 `peace-claude.app`，按页面提供的记录到 DNS 服务商添加即可自动签发 Let's Encrypt HTTPS 证书。
+
+---
+
 ## 本地预览验证
 
 ```bash

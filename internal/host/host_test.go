@@ -93,3 +93,22 @@ func TestDoctorPassedChecksHaveNoFixHint(t *testing.T) {
 		t.Fatalf("expected at least 4 passed checks in offline doctor test, got %d", passCount)
 	}
 }
+
+func TestParseWindowsRegAutoConfigURLAndNotFound(t *testing.T) {
+	sample := `
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
+    AutoConfigURL    REG_SZ    http://127.0.0.1:18899/peaceclaude.pac
+`
+	if got := parseWindowsRegAutoConfigURL(sample); got != "http://127.0.0.1:18899/peaceclaude.pac" {
+		t.Fatalf("unexpected parsed AutoConfigURL: %q", got)
+	}
+	if got := parseWindowsRegAutoConfigURL("HKEY_CURRENT_USER\\...\n    ProxyEnable    REG_DWORD    0x0"); got != "" {
+		t.Fatalf("expected empty when AutoConfigURL missing, got %q", got)
+	}
+	if !isWindowsRegNotFoundErr("ERROR: The system was unable to find the specified registry key or value.") {
+		t.Fatal("expected English reg not-found to match")
+	}
+	if isWindowsRegNotFoundErr("ERROR: Access is denied.") {
+		t.Fatal("access denied must NOT be treated as not-found")
+	}
+}

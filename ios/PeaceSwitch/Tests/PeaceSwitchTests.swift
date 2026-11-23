@@ -162,4 +162,16 @@ final class PeaceSwitchTests: XCTestCase {
         state = DemoStateEngine.apply(action: ActionRequest(action: "toggle_pac", enabled: false), to: state)
         XCTAssertFalse(state.browserPAC.matchesPeaceclaude)
     }
+
+    func testPairingParserRejectsUserinfoSpoofingAndFlagsPublicHTTP() {
+        XCTAssertNil(PairingQRParser.parse("http://trusted.local@evil.example:18900/mobile#pair=PEACE-1"))
+        XCTAssertNil(PairingQRParser.normalizeBaseURL("http://user:pass@192.168.1.2:18900"))
+        XCTAssertNil(PairingQRParser.normalizeBaseURL("http://192.168.1.2:99999"))
+
+        XCTAssertFalse(PairingQRParser.isInsecurePublicHTTP("http://192.168.1.10:18900"))
+        XCTAssertFalse(PairingQRParser.isInsecurePublicHTTP("http://100.64.0.9:18900"))
+        XCTAssertFalse(PairingQRParser.isInsecurePublicHTTP("http://localhost:18900"))
+        XCTAssertFalse(PairingQRParser.isInsecurePublicHTTP("https://relay.example.com"))
+        XCTAssertTrue(PairingQRParser.isInsecurePublicHTTP("http://relay.example.com:18900"))
+    }
 }

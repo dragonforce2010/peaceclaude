@@ -71,19 +71,44 @@ func InspectBrowserPAC(cfg *config.Config) BrowserPACStatus {
 
 const winInternetSettingsKey = `HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 
+func parseWindowsRegAutoConfigURL(out string) string {
+	for _, ln := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(ln)
+		if trimmed == "" {
+			continue
+		}
+		fields := strings.Fields(trimmed)
+		if len(fields) >= 3 && strings.EqualFold(fields[0], "AutoConfigURL") && strings.HasPrefix(strings.ToUpper(fields[1]), "REG_") {
+			// Preserve remainder after the REG_* type token verbatim.
+			idx := strings.Index(trimmed, fields[1])
+			if idx >= 0 {
+				val := strings.TrimSpace(trimmed[idx+len(fields[1]):])
+				if val != "" {
+					return val
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func isWindowsRegNotFoundErr(out string) bool {
+	lower := strings.ToLower(out)
+	return strings.Contains(lower, "unable to find") ||
+		strings.Contains(out, "找不到") ||
+		strings.Contains(lower, "not found")
+}
+
 func inspectWindowsPAC(_ *config.Config, st BrowserPACStatus) BrowserPACStatus {
 	st.ActiveServices = []string{"Windows Internet Settings"}
 	out, err := exec.Command("reg", "query", winInternetSettingsKey, "/v", "AutoConfigURL").Output()
 	if err != nil {
 		return st
 	}
-	for _, ln := range strings.Split(string(out), "\n") {
-		fields := strings.Fields(strings.TrimSpace(ln))
-		if len(fields) >= 3 && strings.EqualFold(fields[0], "AutoConfigURL") {
-			st.CurrentPACURL = fields[len(fields)-1]
-			st.SystemPACEnable = strings.HasPrefix(st.CurrentPACURL, "http")
-			break
-		}
+	val := parseWindowsRegAutoConfigURL(string(out))
+	if val != "" {
+		st.CurrentPACURL = val
+		st.SystemPACEnable = strings.HasPrefix(strings.ToLower(val), "http")
 	}
 	return st
 }
@@ -149,11 +174,15 @@ func SetSystemBrowserPAC(cfg *config.Config, enabled bool, dryRun bool) (Browser
 				if out, err := exec.Command("reg", "add", winInternetSettingsKey, "/v", "AutoConfigURL", "/t", "REG_SZ", "/d", pacURL, "/f").CombinedOutput(); err != nil {
 					return InspectBrowserPAC(cfg), cmds, fmt.Errorf("Windows PAC 写入失败: %v (%s)", err, strings.TrimSpace(string(out)))
 				}
+				notifyWindowsProxyChanged()
 			}
 		} else {
 			cmds = append(cmds, fmt.Sprintf(`reg delete %q /v AutoConfigURL /f`, winInternetSettingsKey))
 			if !dryRun {
-				_ = exec.Command("reg", "delete", winInternetSettingsKey, "/v", "AutoConfigURL", "/f").Run()
+				if out, err := exec.Command("reg", "delete", winInternetSettingsKey, "/v", "AutoConfigURL", "/f").CombinedOutput(); err != nil && !isWindowsRegNotFoundErr(string(out)) {
+					return InspectBrowserPAC(cfg), cmds, fmt.Errorf("Windows PAC 清理失败: %v (%s)", err, strings.TrimSpace(string(out)))
+				}
+				notifyWindowsProxyChanged()
 			}
 		}
 		return InspectBrowserPAC(cfg), cmds, nil
@@ -176,8 +205,12 @@ func SetSystemBrowserPAC(cfg *config.Config, enabled bool, dryRun bool) (Browser
 			}
 		} else {
 			cmds = append(cmds, "gsettings set org.gnome.system.proxy mode 'none'")
+			cmds = append(cmds, "gsettings reset org.gnome.system.proxy autoconfig-url")
 			if !dryRun {
 				_ = exec.Command("gsettings", "set", "org.gnome.system.proxy", "mode", "none").Run()
+				if cur := inspectLinuxPAC(cfg, BrowserPACStatus{PACURL: pacURL}); strings.HasPrefix(cur.CurrentPACURL, pacURL) {
+					_ = exec.Command("gsettings", "reset", "org.gnome.system.proxy", "autoconfig-url").Run()
+				}
 			}
 		}
 		return InspectBrowserPAC(cfg), cmds, nil

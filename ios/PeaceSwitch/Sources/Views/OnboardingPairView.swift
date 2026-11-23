@@ -202,6 +202,17 @@ struct OnboardingPairView: View {
                         .background(PeaceTheme.surfaceMuted)
                         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
+                    if PairingQRParser.isInsecurePublicHTTP(serverAddress) || PairingQRParser.isInsecurePublicHTTP(pastedPayload) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.shield")
+                                .foregroundStyle(PeaceTheme.amber)
+                            Text(store.tr("检测到公网域名使用明文 HTTP，远程中继强烈建议使用 HTTPS。",
+                                          "Plaintext HTTP on a public host detected; HTTPS is strongly recommended for remote relays."))
+                                .font(.caption2)
+                                .foregroundStyle(PeaceTheme.amber)
+                        }
+                    }
+
                     Button {
                         Task {
                             await store.pair(

@@ -3,6 +3,7 @@
 
   const I18N = {
     en: {
+      skip_link: 'Skip to main content',
       nav_arch: 'Cockpit',
       nav_guide: 'Quickstart',
       nav_ecosystem: '3-Platform',
@@ -109,6 +110,7 @@
       tab_cli: 'CLI Guide',
     },
     zh: {
+      skip_link: '跳到正文内容',
       nav_arch: '安全透视',
       nav_guide: '使用教程',
       nav_ecosystem: '三端生态',
@@ -234,13 +236,13 @@ peaceclaude cli`,
       },
       windows: {
         cmdLabel: 'Windows PowerShell Setup',
-        cmd: `Expand-Archive peaceclaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
-$env:Path += ";$HOME\\peaceclaude"
+        cmd: `Expand-Archive PeaceClaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
+$env:Path += ";$HOME\\peaceclaude\\peaceclaude-v0.2.0-windows-amd64"
 peaceclaude.exe service install
 peaceclaude.exe config set-upstream --mode direct-socks5 --addr <HOST>:<PORT> --expected-ip <STATIC_IP>
 peaceclaude.exe status --check`,
         steps: [
-          { num: 'STEP 01', title: 'Extract Release Zip', desc: 'Download <code>peaceclaude-v0.2.0-windows-amd64.zip</code> (or <code>arm64</code>) and place <code>peaceclaude.exe</code> on your PATH.' },
+          { num: 'STEP 01', title: 'Extract Release Zip', desc: 'Download <code>PeaceClaude-v0.2.0-windows-amd64.zip</code> (or <code>arm64</code>) and add the extracted folder to your PATH.' },
           { num: 'STEP 02', title: 'Register HKCU Run Autostart', desc: 'Run <code>peaceclaude.exe service install</code> to write the HKCU Run entry cleanly without UAC admin elevation.' },
           { num: 'STEP 03', title: 'Configure System Scoped PAC', desc: 'Toggle Browser PAC in console or CLI: updates Windows <code>Internet Settings\\AutoConfigURL</code> strictly for Claude domains.' },
           { num: 'STEP 04', title: 'Verify Gate & Run CLI / App', desc: 'Confirm <code>OPEN</code> static IP with <code>peaceclaude.exe status --check</code>, then launch isolated Claude CLI or Desktop.' },
@@ -248,13 +250,13 @@ peaceclaude.exe status --check`,
       },
       ubuntu: {
         cmdLabel: 'Ubuntu / Debian (.deb + systemd --user)',
-        cmd: `sudo dpkg -i peaceclaude_0.2.0_amd64.deb
+        cmd: `sudo dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb
 peaceclaude service install
 peaceclaude config set-upstream --mode direct-socks5 \\
   --addr <HOST>:<PORT> --user <USER> --pass <PASS> --expected-ip <STATIC_IP>
 peaceclaude cli --profile work`,
         steps: [
-          { num: 'STEP 01', title: 'Install Debian Package', desc: 'Install <code>peaceclaude_0.2.0_amd64.deb</code> (or extract Linux <code>.tar.gz</code>). Drops binary to <code>/usr/local/bin</code>.' },
+          { num: 'STEP 01', title: 'Install Debian Package', desc: 'Install <code>PeaceClaude-v0.2.0-ubuntu-amd64.deb</code> (or extract Linux <code>.tar.gz</code>). Installs to <code>/usr/bin/peaceclaude</code>.' },
           { num: 'STEP 02', title: 'Enable systemd --user Unit', desc: 'Run <code>peaceclaude service install</code> to enable and start <code>~/.config/systemd/user/peaceclaude.service</code>.' },
           { num: 'STEP 03', title: 'GNOME PAC & MV3 Shield', desc: 'Desktop environments apply <code>gsettings org.gnome.system.proxy autoconfig-url</code> automatically alongside Chromium MV3.' },
           { num: 'STEP 04', title: 'Open Web Workbench', desc: 'Visit <code>http://127.0.0.1:18899</code> in your Linux browser to inspect 11-point Doctor scores and pair your phone.' },
@@ -290,13 +292,13 @@ peaceclaude cli`,
       },
       windows: {
         cmdLabel: 'Windows PowerShell 快速部署',
-        cmd: `Expand-Archive peaceclaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
-$env:Path += ";$HOME\\peaceclaude"
+        cmd: `Expand-Archive PeaceClaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
+$env:Path += ";$HOME\\peaceclaude\\peaceclaude-v0.2.0-windows-amd64"
 peaceclaude.exe service install
 peaceclaude.exe config set-upstream --mode direct-socks5 --addr <HOST>:<PORT> --expected-ip <STATIC_IP>
 peaceclaude.exe status --check`,
         steps: [
-          { num: 'STEP 01', title: '解压 Windows 绿色发行包', desc: '下载 <code>peaceclaude-v0.2.0-windows-amd64.zip</code>（或 <code>arm64</code>）解压并加入系统 PATH。' },
+          { num: 'STEP 01', title: '解压 Windows 绿色发行包', desc: '下载 <code>PeaceClaude-v0.2.0-windows-amd64.zip</code>（或 <code>arm64</code>）解压并将内层目录加入 PATH。' },
           { num: 'STEP 02', title: '免管理员权限开机自启动', desc: '运行 <code>peaceclaude.exe service install</code> 自动写入当前用户注册表 <code>HKCU\\...\\Run</code> 静默自启项。' },
           { num: 'STEP 03', title: '自动切换域内系统 PAC', desc: '开启 PAC 护航后自动写入 Windows <code>Internet Settings\\AutoConfigURL</code>，严格只接管 Claude 相关域名。' },
           { num: 'STEP 04', title: '门禁复检并启动 CLI / 桌面端', desc: '运行 <code>peaceclaude.exe status --check</code> 确认显示 <code>OPEN</code> 后，打开隔离版 CLI 或浏览器工作台。' },
@@ -304,13 +306,13 @@ peaceclaude.exe status --check`,
       },
       ubuntu: {
         cmdLabel: 'Ubuntu / Debian (.deb 与 systemd --user)',
-        cmd: `sudo dpkg -i peaceclaude_0.2.0_amd64.deb
+        cmd: `sudo dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb
 peaceclaude service install
 peaceclaude config set-upstream --mode direct-socks5 \\
   --addr <HOST>:<PORT> --user <USER> --pass <PASS> --expected-ip <STATIC_IP>
 peaceclaude cli --profile work`,
         steps: [
-          { num: 'STEP 01', title: '安装 .deb 安装包', desc: '执行 <code>dpkg -i peaceclaude_0.2.0_amd64.deb</code>（或解压 <code>.tar.gz</code>），一键安装至 <code>/usr/local/bin</code>。' },
+          { num: 'STEP 01', title: '安装 .deb 安装包', desc: '执行 <code>dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb</code>（或解压 <code>.tar.gz</code>），自动安装至 <code>/usr/bin/peaceclaude</code>。' },
           { num: 'STEP 02', title: '注册 systemd --user 常驻服务', desc: '执行 <code>peaceclaude service install</code> 自动配置并启动 <code>~/.config/systemd/user/peaceclaude.service</code>。' },
           { num: 'STEP 03', title: 'GNOME PAC 与 Chrome 扩展协同', desc: '通过 <code>gsettings</code> 自动下发系统 PAC 地址，并结合 Chrome/Brave 开发者扩展完成域内指纹护盾。' },
           { num: 'STEP 04', title: '浏览器打开本地控制台', desc: '访问 <code>http://127.0.0.1:18899</code> 查看 11 项体检分数并向 PeaceSwitch iPhone 端配对。' },
@@ -341,17 +343,17 @@ peaceclaude remote enable --mode lan
 
   const INSTALL_SNIPPETS = {
     macos: `# macOS Universal (Apple Silicon + Intel)
-tar -xzf peaceclaude-v0.2.0-darwin-universal.tar.gz
-cd peaceclaude-v0.2.0-darwin-universal
+tar -xzf peaceclaude-v0.2.0-macos-universal.tar.gz
+cd peaceclaude-v0.2.0-macos-universal
 ./install.sh
 peaceclaude status --check`,
     windows: `# Windows 10 / 11 (amd64 / arm64) PowerShell
-Expand-Archive peaceclaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
-$env:Path += ";$HOME\\peaceclaude"
+Expand-Archive PeaceClaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
+$env:Path += ";$HOME\\peaceclaude\\peaceclaude-v0.2.0-windows-amd64"
 peaceclaude.exe service install
 peaceclaude.exe status --check`,
     ubuntu: `# Ubuntu / Debian Linux (amd64 / arm64)
-sudo dpkg -i peaceclaude_0.2.0_amd64.deb
+sudo dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb
 peaceclaude service install
 peaceclaude status --check`,
     ios: `# iOS Companion App (PeaceSwitch · Pure SwiftUI)
@@ -465,19 +467,34 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     const t = theme === 'dark' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', t);
     if ($('theme-icon')) $('theme-icon').textContent = t === 'dark' ? '☀' : '◐';
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) metaTheme.setAttribute('content', t === 'dark' ? '#0F1317' : '#FAF7F2');
     try { localStorage.setItem('peaceclaude_site_theme', t); } catch {}
+  }
+
+  function announce(msg) {
+    const live = $('a11y-live');
+    if (live && msg) live.textContent = msg;
   }
 
   $('peace-switch-btn')?.addEventListener('click', () => {
     switchSafe = !switchSafe;
+    // Sync interactive iPhone mockup when switching Hero telemetry unless explicitly overridden later
+    iosLocked = !switchSafe;
     renderTelemetryDeck();
+    renderIOSMockup();
+    announce(switchSafe ? (curLang === 'zh' ? '已切换至护航开启' : 'Peace Switch set to Guarded') : (curLang === 'zh' ? '已切换至暴露风险对比' : 'Peace Switch set to Exposed'));
   });
 
   $('guide-tabs')?.addEventListener('click', (ev) => {
     const btn = ev.target.closest('.guide-tab');
     if (!btn) return;
-    document.querySelectorAll('.guide-tab').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.guide-tab').forEach((b) => {
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
     btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
     guidePlatform = btn.dataset.platform || 'macos';
     renderGuide();
   });
@@ -506,8 +523,12 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
   $('showcase-tabs')?.addEventListener('click', (ev) => {
     const btn = ev.target.closest('.sc-tab');
     if (!btn) return;
-    document.querySelectorAll('.sc-tab').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.sc-tab').forEach((b) => {
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
     btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
     curShotTab = btn;
     $('showcase-img').src = 'assets/' + btn.dataset.shot;
     $('showcase-caption').textContent = curLang === 'zh' ? btn.dataset.captionZh : btn.dataset.captionEn;
@@ -516,8 +537,12 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
   $('install-tabs')?.addEventListener('click', (ev) => {
     const btn = ev.target.closest('.ins-tab');
     if (!btn) return;
-    document.querySelectorAll('.ins-tab').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.ins-tab').forEach((b) => {
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
     btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
     installMode = btn.dataset.mode || 'macos';
     $('install-code').innerHTML = '<code>' + escapeHTML(INSTALL_SNIPPETS[installMode] || '') + '</code>';
   });
@@ -525,6 +550,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
   $('btn-hero-copy')?.addEventListener('click', async () => {
     const cmd = ($('hero-copy-cmd')?.textContent || './install.sh').trim();
     try { await navigator.clipboard.writeText(cmd); } catch {}
+    announce(curLang === 'zh' ? '安装命令已复制到剪贴板' : 'Install command copied to clipboard');
     const tag = $('hero-copy-tag');
     if (tag) {
       tag.textContent = curLang === 'zh' ? '已复制' : 'Copied!';
@@ -535,6 +561,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
   $('btn-copy-guide')?.addEventListener('click', async () => {
     const data = (GUIDE_DATA[curLang] && GUIDE_DATA[curLang][guidePlatform]) || GUIDE_DATA.en.macos;
     try { await navigator.clipboard.writeText(data.cmd); } catch {}
+    announce(curLang === 'zh' ? '平台教程命令已复制到剪贴板' : 'Platform quickstart steps copied');
     const btn = $('btn-copy-guide');
     if (btn) {
       btn.textContent = curLang === 'zh' ? '已复制!' : 'Copied!';
@@ -544,6 +571,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
 
   $('btn-copy-install')?.addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(INSTALL_SNIPPETS[installMode] || ''); } catch {}
+    announce(curLang === 'zh' ? '安装步骤已复制到剪贴板' : 'Release install steps copied');
     const btn = $('btn-copy-install');
     if (btn) {
       btn.textContent = curLang === 'zh' ? '已复制!' : 'Copied!';

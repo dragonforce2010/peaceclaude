@@ -176,6 +176,8 @@ struct CockpitDashboardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .disabled(store.isBusyAction)
+                .accessibilityLabel(gateOpen ? store.tr("紧急熔断断网", "Emergency Lock") : store.tr("恢复静默放行", "Unlock Gate"))
+                .accessibilityHint(store.tr("切换静态 IP 门禁 Fail-Closed 状态", "Toggles fail-closed egress lock on your paired workstation"))
 
                 Button {
                     Task { await store.checkGate() }
@@ -192,6 +194,7 @@ struct CockpitDashboardView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
                 .disabled(store.isBusyAction)
+                .accessibilityLabel(store.tr("重新检测静态出口 IP", "Re-Probe Static Egress"))
             }
         }
         .atelierCard()
@@ -231,6 +234,7 @@ struct CockpitDashboardView: View {
             .labelsHidden()
             .tint(PeaceTheme.emerald)
             .disabled(store.isBusyAction)
+            .accessibilityLabel(store.tr("本机浏览器 PAC 护航开关", "System Browser PAC Shield Toggle"))
         }
         .atelierCard()
     }

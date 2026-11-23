@@ -442,33 +442,53 @@ func (s *Server) handleMobileState(w http.ResponseWriter, r *http.Request) {
 	rep := host.InspectRunningDesktop(&cfg)
 	refresh := r.URL.Query().Get("refresh") == "1"
 
-	accounts := make([]map[string]any, 0, len(list))
-	for _, p := range list {
-		pids := findRunningPIDsForProfile(rep, p)
-		runningPID := ""
-		if len(pids) > 0 {
-			runningPID = pids[0]
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-		usage := s.getProfileUsage(ctx, &cfg, &p, refresh)
-		cancel()
-		activated := p.HasCLICreds || p.HasDesktopAuth || p.Account.Source == "claude_json"
-		accounts = append(accounts, map[string]any{
-			"name":                p.Name,
-			"display_name":        p.DisplayName,
-			"active":              p.Active,
-			"activated":           activated,
-			"running_desktop_pid": runningPID,
-			"plan_label":          p.Account.PlanLabel,
-			"email":               p.Account.Email,
-			"account_age_text":    p.Account.AccountAgeText,
-			"usage":               usage,
-		})
+	usageBudget := 4 * time.Second
+	if refresh {
+		usageBudget = 10 * time.Second
 	}
+	usageCtx, usageCancel := context.WithTimeout(r.Context(), usageBudget)
+	defer usageCancel()
+
+	accounts := make([]map[string]any, len(list))
+	var wg sync.WaitGroup
+	for i := range list {
+		idx := i
+		p := list[idx]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pids := findRunningPIDsForProfile(rep, p)
+			runningPID := ""
+			if len(pids) > 0 {
+				runningPID = pids[0]
+			}
+			usage := s.getProfileUsage(usageCtx, &cfg, &p, refresh)
+			activated := p.HasCLICreds || p.HasDesktopAuth || p.Account.Source == "claude_json"
+			accounts[idx] = map[string]any{
+				"name":                p.Name,
+				"display_name":        p.DisplayName,
+				"active":              p.Active,
+				"activated":           activated,
+				"running_desktop_pid": runningPID,
+				"plan_label":          p.Account.PlanLabel,
+				"email":               p.Account.Email,
+				"account_age_text":    p.Account.AccountAgeText,
+				"usage":               usage,
+			}
+		}()
+	}
+
+	var docRep host.DoctorReport
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		docCtx, docCancel := context.WithTimeout(r.Context(), 4*time.Second)
+		defer docCancel()
+		docRep = host.RunDoctor(docCtx, &cfg, true, s.gate.Snapshot())
+	}()
+
+	wg.Wait()
 	hostName, _ := os.Hostname()
-	docCtx, docCancel := context.WithTimeout(r.Context(), 4*time.Second)
-	docRep := host.RunDoctor(docCtx, &cfg, true, s.gate.Snapshot())
-	docCancel()
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":        version.Version,

@@ -12,6 +12,7 @@ import (
 	"peaceclaude/internal/config"
 	"peaceclaude/internal/egress"
 	"peaceclaude/internal/host"
+	"peaceclaude/internal/profile"
 )
 
 func TestDaemonControlAPICSRFAndRedaction(t *testing.T) {
@@ -719,5 +720,25 @@ func TestMobileExtendedStateAndActions(t *testing.T) {
 	c4, m4 := postMobile(`{"action":"unlock_gate"}`)
 	if c4 != http.StatusOK || m4["ok"] != true {
 		t.Fatalf("unlock_gate failed: %d %v", c4, m4)
+	}
+
+	// 3. Concurrency check on multiple profiles ensuring /mobile/api/state finishes within tight budget
+	for _, extra := range []string{"extra-one", "extra-two", "extra-three"} {
+		_, _ = profile.Ensure(srv.cfg, extra, "Extra "+extra)
+	}
+	start := time.Now()
+	reqMulti, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/mobile/api/state", nil)
+	reqMulti.Header.Set("Authorization", "Bearer "+tok)
+	rrMulti := newResponseRecorder()
+	handler.ServeHTTP(rrMulti, reqMulti)
+	elapsed := time.Since(start)
+	if rrMulti.code != http.StatusOK || elapsed > 5*time.Second {
+		t.Fatalf("multi-profile /mobile/api/state code=%d elapsed=%v body=%s", rrMulti.code, elapsed, rrMulti.body.String())
+	}
+	var multiRes struct {
+		Accounts []map[string]any `json:"accounts"`
+	}
+	if err := json.Unmarshal(rrMulti.body.Bytes(), &multiRes); err != nil || len(multiRes.Accounts) < 4 {
+		t.Fatalf("expected >=4 concurrent accounts in mobile state, got %d err=%v", len(multiRes.Accounts), err)
 	}
 }

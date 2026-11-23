@@ -529,22 +529,28 @@ else
   fail "native_browser_shield_api" "native browser shield check failed"
 fi
 
-# 16f. Verify service status JSON fields & sandbox-safe ensure-autostart & /api/service/autostart contract
+# 16f. Verify service status JSON fields & sandbox-safe ensure-autostart & service install / remote CLI
 SVC_STATUS_JSON="$(PEACECLAUDE_HOME="$TMP_HOME" PEACECLAUDE_NO_LAUNCHD=1 "$BIN" service status --json)"
 ENSURE_JSON="$(PEACECLAUDE_HOME="$TMP_HOME" PEACECLAUDE_NO_LAUNCHD=1 "$BIN" service ensure-autostart --if-enabled --json)"
-if python3 - "$SVC_STATUS_JSON" "$ENSURE_JSON" <<'PY'
+INSTALL_ALIAS_JSON="$(PEACECLAUDE_HOME="$TMP_HOME" PEACECLAUDE_NO_LAUNCHD=1 "$BIN" service install --if-enabled --json)"
+REMOTE_CLI_JSON="$(PEACECLAUDE_HOME="$TMP_HOME" "$BIN" remote status --json)"
+if python3 - "$SVC_STATUS_JSON" "$ENSURE_JSON" "$INSTALL_ALIAS_JSON" "$REMOTE_CLI_JSON" <<'PY'
 import json, sys
 st = json.loads(sys.argv[1])
 en = json.loads(sys.argv[2])
+ins = json.loads(sys.argv[3])
+rem = json.loads(sys.argv[4])
 for key in ("running", "launch_agent_installed", "launch_agent_loaded", "launch_agent_valid", "auto_start_enabled"):
     assert key in st, f"service status missing {key}: {st}"
 assert st["running"] is True and st["auto_start_enabled"] is True, st
 assert en.get("action") == "disabled_in_sandbox", f"unexpected sandbox ensure-autostart: {en}"
+assert ins.get("action") == "disabled_in_sandbox", f"unexpected service install alias: {ins}"
+assert "mobile_port" in rem, f"unexpected remote status JSON: {rem}"
 PY
 then
-  ok "service_status_and_ensure_autostart_sandbox" "service status JSON exposes launchd validity and ensure-autostart is sandbox-safe"
+  ok "service_status_and_ensure_autostart_sandbox" "service status/install alias JSON & remote status CLI verified"
 else
-  fail "service_status_and_ensure_autostart_sandbox" "service status or ensure-autostart JSON check failed"
+  fail "service_status_and_ensure_autostart_sandbox" "service status, install alias, or remote status CLI check failed"
 fi
 
 STATUS_API_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/status")"

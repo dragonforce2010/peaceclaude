@@ -53,6 +53,8 @@ enum PairingQRParser {
 
         guard let scheme = components.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
+              components.user == nil,
+              components.password == nil,
               let host = components.host, !host.isEmpty else {
             return nil
         }
@@ -82,7 +84,12 @@ enum PairingQRParser {
         guard var comp = URLComponents(string: s),
               let scheme = comp.scheme?.lowercased(),
               scheme == "http" || scheme == "https",
+              comp.user == nil,
+              comp.password == nil,
               let host = comp.host, !host.isEmpty else {
+            return nil
+        }
+        if let port = comp.port, (port <= 0 || port > 65535) {
             return nil
         }
         comp.fragment = nil
@@ -96,6 +103,28 @@ enum PairingQRParser {
         }
         comp.path = path
         return comp.string
+    }
+
+    /// Flags plaintext `http://` targeting non-private/non-Tailscale hosts so users can prefer HTTPS relays.
+    static func isInsecurePublicHTTP(_ rawURL: String) -> Bool {
+        guard let norm = normalizeBaseURL(rawURL),
+              let comp = URLComponents(string: norm),
+              comp.scheme?.lowercased() == "http",
+              let host = comp.host?.lowercased() else {
+            return false
+        }
+        if host == "localhost" || host == "127.0.0.1" || host == "::1" || host.hasSuffix(".local") {
+            return false
+        }
+        let octets = host.split(separator: ".").compactMap { Int($0) }
+        if octets.count == 4 {
+            let (a, b) = (octets[0], octets[1])
+            if a == 10 || a == 127 { return false }
+            if a == 192 && b == 168 { return false }
+            if a == 172 && (16...31).contains(b) { return false }
+            if a == 100 && (64...127).contains(b) { return false } // Tailscale CGNAT 100.64.0.0/10
+        }
+        return true
     }
 
     private static func parseJSONPayload(_ jsonString: String) -> PairingQRPayload? {

@@ -26,10 +26,10 @@ enum PeaceAPIError: LocalizedError, Equatable {
 final class PeaceAPIClient: Sendable {
     private let session: URLSession
 
-    init(timeout: TimeInterval = 8) {
+    init(timeout: TimeInterval = 12) {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = timeout
-        config.timeoutIntervalForResource = timeout + 4
+        config.timeoutIntervalForResource = timeout + 8
         config.waitsForConnectivity = false
         self.session = URLSession(configuration: config)
     }
@@ -41,6 +41,7 @@ final class PeaceAPIClient: Sendable {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = 12
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(
             RedeemRequest(code: code, deviceName: deviceName, os: "iOS")
@@ -73,6 +74,7 @@ final class PeaceAPIClient: Sendable {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = forceProbe ? 18 : 12
         request.setValue("Bearer \(record.bearerToken)", forHTTPHeaderField: "Authorization")
 
         let (data, http) = try await perform(request)
@@ -96,6 +98,8 @@ final class PeaceAPIClient: Sendable {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        let longAction = payload.action == "check_gate" || payload.action == "unlock_gate" || payload.action == "launch_desktop"
+        request.timeoutInterval = longAction ? 18 : 12
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(record.bearerToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONEncoder().encode(payload)

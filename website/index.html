@@ -5,10 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PeaceClaude — Multi-Platform Zero-VM Static-IP Security Cockpit</title>
   <meta name="description" content="Zero-VM, Fail-Closed static-IP control cockpit across macOS, Windows, Ubuntu Linux, Local Web, and iOS PeaceSwitch." />
+  <meta name="theme-color" content="#FAF7F2" />
+  <link rel="canonical" href="https://peaceclaude-hub.netlify.app/" />
+  <meta property="og:title" content="PeaceClaude — Multi-Platform Zero-VM Static-IP Security Cockpit" />
+  <meta property="og:description" content="Lock Claude Desktop, CLI & native Arc/Chrome to a verified static US egress IP across macOS, Windows, Ubuntu, and PeaceSwitch iOS." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://peaceclaude-hub.netlify.app/" />
+  <meta property="og:image" content="https://peaceclaude-hub.netlify.app/assets/accounts-overview.png" />
+  <meta name="twitter:card" content="summary_large_image" />
   <link rel="icon" type="image/png" href="assets/peace-logo.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <a class="skip-link" href="#top" data-i18n="skip_link">Skip to main content</a>
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand" href="#top">
@@ -157,11 +166,11 @@
         </div>
 
         <div class="guide-shell">
-          <div class="guide-tabs" id="guide-tabs" role="tablist">
-            <button type="button" class="guide-tab active" data-platform="macos">macOS (Universal)</button>
-            <button type="button" class="guide-tab" data-platform="windows">Windows 10 / 11</button>
-            <button type="button" class="guide-tab" data-platform="ubuntu">Ubuntu Linux (.deb)</button>
-            <button type="button" class="guide-tab" data-platform="ios">iOS PeaceSwitch</button>
+          <div class="guide-tabs" id="guide-tabs" role="tablist" aria-label="Quickstart Platforms">
+            <button type="button" class="guide-tab active" role="tab" aria-selected="true" data-platform="macos">macOS (Universal)</button>
+            <button type="button" class="guide-tab" role="tab" aria-selected="false" data-platform="windows">Windows 10 / 11</button>
+            <button type="button" class="guide-tab" role="tab" aria-selected="false" data-platform="ubuntu">Ubuntu Linux (.deb)</button>
+            <button type="button" class="guide-tab" role="tab" aria-selected="false" data-platform="ios">iOS PeaceSwitch</button>
           </div>
 
           <div class="guide-steps-grid" id="guide-steps-grid"></div>
@@ -412,13 +421,13 @@
         </div>
 
         <div class="showcase-shell">
-          <div class="showcase-tabs" id="showcase-tabs" role="tablist">
-            <button type="button" class="sc-tab active" data-shot="accounts-overview.png" data-i18n="tab_acc" data-caption-en="Multi-account Hero cockpit with Pro 5h/Weekly telemetry bars, Free tier status, per-account security scores, and standby roster." data-caption-zh="三段式多账号焦点工作台：Pro 5h/Weekly 双列配额、Free 清晰提示、单账号安全得分与一键切号。">Multi-Account</button>
-            <button type="button" class="sc-tab" data-shot="security-doctor.png" data-i18n="tab_sec" data-caption-en="11/11 Security Doctor with live ring score, zero-clutter passed checks, browser fingerprint audit, and 1-click remediation." data-caption-zh="11/11 全链路安全体检：实时评分环、精简无冗余的通过项、浏览器指纹自检与 403 三分诊。">Security Doctor</button>
-            <button type="button" class="sc-tab" data-shot="native-browser-shield.png" data-i18n="tab_nb" data-caption-en="Multi-select native browser protection combining Claude-only PAC with domain-scoped MV3 Identity Shield detection." data-caption-zh="原生浏览器多选护航：结合仅分流 Claude 的系统 PAC 与域名定向 MV3 护航扩展实时状态扫描。">Native Browser Shield</button>
-            <button type="button" class="sc-tab" data-shot="appearance-studio.png" data-i18n="tab_app" data-caption-en="Appearance Studio with 6 light + 6 dark curated palettes, live miniature console stage, and custom accent pickers." data-caption-zh="外观工坊：浅深共 12 套原创调色板、实时微缩画布与字体尺度微调。">Appearance Studio</button>
-            <button type="button" class="sc-tab" data-shot="remote-pair.png" data-i18n="tab_rem" data-caption-en="LAN / Tailscale mobile pairing pass with 120s countdown and instant device revocation." data-caption-zh="零云端中继的局域网 / Tailscale 手机扫码配对通行证，带 120 秒倒计时与随手踢除。">Mobile Pairing</button>
-            <button type="button" class="sc-tab" data-shot="cli-guide.png" data-i18n="tab_cli" data-caption-en="Built-in categorized CLI launcher &amp; safety command cheatsheet with 1-click clipboard copy." data-caption-zh="内置四分类 CLI 终端命令速查与 PAC 安全提示，任意指令一键复制。">CLI Guide</button>
+          <div class="showcase-tabs" id="showcase-tabs" role="tablist" aria-label="Workbench Screenshots">
+            <button type="button" class="sc-tab active" role="tab" aria-selected="true" data-shot="accounts-overview.png" data-i18n="tab_acc" data-caption-en="Multi-account Hero cockpit with Pro 5h/Weekly telemetry bars, Free tier status, per-account security scores, and standby roster." data-caption-zh="三段式多账号焦点工作台：Pro 5h/Weekly 双列配额、Free 清晰提示、单账号安全得分与一键切号。">Multi-Account</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="security-doctor.png" data-i18n="tab_sec" data-caption-en="11/11 Security Doctor with live ring score, zero-clutter passed checks, browser fingerprint audit, and 1-click remediation." data-caption-zh="11/11 全链路安全体检：实时评分环、精简无冗余的通过项、浏览器指纹自检与 403 三分诊。">Security Doctor</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="native-browser-shield.png" data-i18n="tab_nb" data-caption-en="Multi-select native browser protection combining Claude-only PAC with domain-scoped MV3 Identity Shield detection." data-caption-zh="原生浏览器多选护航：结合仅分流 Claude 的系统 PAC 与域名定向 MV3 护航扩展实时状态扫描。">Native Browser Shield</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="appearance-studio.png" data-i18n="tab_app" data-caption-en="Appearance Studio with 6 light + 6 dark curated palettes, live miniature console stage, and custom accent pickers." data-caption-zh="外观工坊：浅深共 12 套原创调色板、实时微缩画布与字体尺度微调。">Appearance Studio</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="remote-pair.png" data-i18n="tab_rem" data-caption-en="LAN / Tailscale mobile pairing pass with 120s countdown and instant device revocation." data-caption-zh="零云端中继的局域网 / Tailscale 手机扫码配对通行证，带 120 秒倒计时与随手踢除。">Mobile Pairing</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="cli-guide.png" data-i18n="tab_cli" data-caption-en="Built-in categorized CLI launcher &amp; safety command cheatsheet with 1-click clipboard copy." data-caption-zh="内置四分类 CLI 终端命令速查与 PAC 安全提示，任意指令一键复制。">CLI Guide</button>
           </div>
 
           <div class="window-frame">
@@ -483,16 +492,16 @@
           <div class="section-kicker" data-i18n="ins_kicker">4-PLATFORM RELEASES · v0.2.0</div>
           <h2 data-i18n="ins_title">Deploy everywhere your Claude workflow runs.</h2>
 
-          <div class="install-tabs" id="install-tabs">
-            <button type="button" class="ins-tab active" data-mode="macos">macOS Universal</button>
-            <button type="button" class="ins-tab" data-mode="windows">Windows (.exe/.zip)</button>
-            <button type="button" class="ins-tab" data-mode="ubuntu">Ubuntu (.deb/.tar.gz)</button>
-            <button type="button" class="ins-tab" data-mode="ios">iOS (PeaceSwitch)</button>
+          <div class="install-tabs" id="install-tabs" role="tablist" aria-label="Download Platforms">
+            <button type="button" class="ins-tab active" role="tab" aria-selected="true" data-mode="macos">macOS Universal</button>
+            <button type="button" class="ins-tab" role="tab" aria-selected="false" data-mode="windows">Windows (.exe/.zip)</button>
+            <button type="button" class="ins-tab" role="tab" aria-selected="false" data-mode="ubuntu">Ubuntu (.deb/.tar.gz)</button>
+            <button type="button" class="ins-tab" role="tab" aria-selected="false" data-mode="ios">iOS (PeaceSwitch)</button>
           </div>
 
           <pre class="install-code" id="install-code"><code># macOS Universal (Apple Silicon + Intel)
-tar -xzf peaceclaude-v0.2.0-darwin-universal.tar.gz
-cd peaceclaude-v0.2.0-darwin-universal
+tar -xzf peaceclaude-v0.2.0-macos-universal.tar.gz
+cd peaceclaude-v0.2.0-macos-universal
 ./install.sh
 peaceclaude status --check</code></pre>
 
@@ -521,6 +530,7 @@ peaceclaude status --check</code></pre>
       </div>
     </div>
   </footer>
+  <div id="a11y-live" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
   <script src="app.js"></script>
 </body>
