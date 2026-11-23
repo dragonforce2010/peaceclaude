@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 
 	"peaceclaude/internal/config"
 	"peaceclaude/internal/egress"
@@ -138,10 +137,10 @@ func LaunchCLI(ctx context.Context, cfg *config.Config, selfBin, profileName str
 		return nil
 	}
 
-	// Replace current process with Claude CLI so TTY, signals, and resize behave 100% natively.
+	// Replace current process with Claude CLI so TTY, signals, and resize behave 100% natively on Unix,
+	// or run as foreground child process on Windows.
 	argv := append([]string{cliBin}, args...)
-	if err := syscall.Exec(cliBin, argv, env); err != nil {
-		// Fallback to subprocess if exec fails for any reason.
+	if err := execReplaceOrRun(cliBin, argv, env); err != nil {
 		cmd := exec.Command(cliBin, args...)
 		cmd.Env = env
 		cmd.Stdin = os.Stdin

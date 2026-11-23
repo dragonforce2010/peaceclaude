@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"peaceclaude/internal/audit"
@@ -526,7 +525,7 @@ func (s *Server) acquireAutoPeaceLock() bool {
 	if err != nil {
 		return false
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := tryExclusiveLockFile(f); err != nil {
 		_ = f.Close()
 		return false
 	}
@@ -542,7 +541,7 @@ func (s *Server) releaseAutoPeaceLock() {
 	s.autoPeaceLockFile = nil
 	s.takeoverMu.Unlock()
 	if f != nil {
-		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		unlockExclusiveFile(f)
 		_ = f.Close()
 	}
 }

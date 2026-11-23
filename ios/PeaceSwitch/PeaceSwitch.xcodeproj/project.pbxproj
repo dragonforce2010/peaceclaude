@@ -1,0 +1,510 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1AB365E1CE5A3B58E470FC7B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A8E19DA4F95DD35B8DA09FC6 /* Assets.xcassets */; };
+		1D23E8A4693224810ED4F110 /* PeaceTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96AEE4B3DEDC79C91B95AC4A /* PeaceTheme.swift */; };
+		22FE9C199278D9322A347084 /* PeaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05627530EE924DE6A8049A1B /* PeaceModels.swift */; };
+		272129748DF1A8DBDA3C33FB /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F1490273C459204BE894F97 /* KeychainStore.swift */; };
+		2DECA189998BA3305CD6F430 /* DemoStateEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 041CC8E49B88B1211DA72733 /* DemoStateEngine.swift */; };
+		34074927B3F7052CFE5471C8 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 585862998348631A910849DE /* QRScannerView.swift */; };
+		37AD34935D7C9189F6AA0ED8 /* PeaceSwitchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E972912E3CA0A161AAE0AC30 /* PeaceSwitchTests.swift */; };
+		3A40DDE29342E7CF6B7DB544 /* SettingsConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA4DE42068B26C3E6FFCF68F /* SettingsConnectionView.swift */; };
+		6C87D118EE5AB6EF096EA1B0 /* AccountsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76ACB664163A6BAF4EA1772 /* AccountsListView.swift */; };
+		6E95096E78CE4F499ADA66B8 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 72615E2363C6C0C5B3903D5C /* PrivacyInfo.xcprivacy */; };
+		AA41E9DB2BF965BE3D6BA9E1 /* CockpitStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B946E9AB0F1BFB1490B41789 /* CockpitStore.swift */; };
+		AAA3FA3F7B421DB377F315AB /* CockpitDashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC31167FB321A18C9DBB9F3A /* CockpitDashboardView.swift */; };
+		AD9FBDDB18936EC579BB888E /* OnboardingPairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2D54E07F71BECC59D8A0AA6 /* OnboardingPairView.swift */; };
+		B4D9B6A131E585AA025CA815 /* PeaceSwitchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30F857F07D30F1DD992F7190 /* PeaceSwitchApp.swift */; };
+		C9865D9E0BA1C0B054E977D4 /* PeaceAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30FE35EB72A42EDEEA693A83 /* PeaceAPIClient.swift */; };
+		F85B7C061763C0986E9AF841 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95FFD179B13CE19C9FDC5113 /* MainTabView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		31EAB6E5370E1FB17829CB5C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E44E9A0D5BE6A5BAE01AA278 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C9222ACF2405663AF57762C8;
+			remoteInfo = PeaceSwitch;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		041CC8E49B88B1211DA72733 /* DemoStateEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoStateEngine.swift; sourceTree = "<group>"; };
+		05627530EE924DE6A8049A1B /* PeaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeaceModels.swift; sourceTree = "<group>"; };
+		30F857F07D30F1DD992F7190 /* PeaceSwitchApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeaceSwitchApp.swift; sourceTree = "<group>"; };
+		30FE35EB72A42EDEEA693A83 /* PeaceAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeaceAPIClient.swift; sourceTree = "<group>"; };
+		33395CA282ABF72807A3F09E /* PeaceSwitchTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PeaceSwitchTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		585862998348631A910849DE /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		72615E2363C6C0C5B3903D5C /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		8BBFF06BA0BEA855A94BD473 /* PeaceSwitch.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PeaceSwitch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		95FFD179B13CE19C9FDC5113 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
+		96AEE4B3DEDC79C91B95AC4A /* PeaceTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeaceTheme.swift; sourceTree = "<group>"; };
+		9F1490273C459204BE894F97 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		A8E19DA4F95DD35B8DA09FC6 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B2D54E07F71BECC59D8A0AA6 /* OnboardingPairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingPairView.swift; sourceTree = "<group>"; };
+		B946E9AB0F1BFB1490B41789 /* CockpitStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitStore.swift; sourceTree = "<group>"; };
+		BC31167FB321A18C9DBB9F3A /* CockpitDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CockpitDashboardView.swift; sourceTree = "<group>"; };
+		D76ACB664163A6BAF4EA1772 /* AccountsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountsListView.swift; sourceTree = "<group>"; };
+		DA4DE42068B26C3E6FFCF68F /* SettingsConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsConnectionView.swift; sourceTree = "<group>"; };
+		E972912E3CA0A161AAE0AC30 /* PeaceSwitchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeaceSwitchTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		009D31F0476053F429EE7015 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				A8E19DA4F95DD35B8DA09FC6 /* Assets.xcassets */,
+				72615E2363C6C0C5B3903D5C /* PrivacyInfo.xcprivacy */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		126EECB74615A57C5B304F3A = {
+			isa = PBXGroup;
+			children = (
+				009D31F0476053F429EE7015 /* Resources */,
+				9B365FFC7B8E671D50059827 /* Sources */,
+				8C4E8B7893E1AB953A91969B /* Tests */,
+				403464A92F1F5F26F888BE54 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		29877201DFE8FEF20EEF0469 /* ViewModels */ = {
+			isa = PBXGroup;
+			children = (
+				B946E9AB0F1BFB1490B41789 /* CockpitStore.swift */,
+			);
+			path = ViewModels;
+			sourceTree = "<group>";
+		};
+		403464A92F1F5F26F888BE54 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8BBFF06BA0BEA855A94BD473 /* PeaceSwitch.app */,
+				33395CA282ABF72807A3F09E /* PeaceSwitchTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4AD7815E30633EEC19529373 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				D76ACB664163A6BAF4EA1772 /* AccountsListView.swift */,
+				BC31167FB321A18C9DBB9F3A /* CockpitDashboardView.swift */,
+				95FFD179B13CE19C9FDC5113 /* MainTabView.swift */,
+				B2D54E07F71BECC59D8A0AA6 /* OnboardingPairView.swift */,
+				30F857F07D30F1DD992F7190 /* PeaceSwitchApp.swift */,
+				585862998348631A910849DE /* QRScannerView.swift */,
+				DA4DE42068B26C3E6FFCF68F /* SettingsConnectionView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		89795FA0856B0284E596C80A /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				05627530EE924DE6A8049A1B /* PeaceModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		8C4E8B7893E1AB953A91969B /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				E972912E3CA0A161AAE0AC30 /* PeaceSwitchTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		9B365FFC7B8E671D50059827 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				89795FA0856B0284E596C80A /* Models */,
+				FD401B403A012036F199DFED /* Services */,
+				B1728A094649CB57E6AF7AED /* Theme */,
+				29877201DFE8FEF20EEF0469 /* ViewModels */,
+				4AD7815E30633EEC19529373 /* Views */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		B1728A094649CB57E6AF7AED /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				96AEE4B3DEDC79C91B95AC4A /* PeaceTheme.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		FD401B403A012036F199DFED /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				041CC8E49B88B1211DA72733 /* DemoStateEngine.swift */,
+				9F1490273C459204BE894F97 /* KeychainStore.swift */,
+				30FE35EB72A42EDEEA693A83 /* PeaceAPIClient.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8267CB3BE3D024CF9E7AEDDB /* PeaceSwitchTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0EE93361350034C725B1EA76 /* Build configuration list for PBXNativeTarget "PeaceSwitchTests" */;
+			buildPhases = (
+				80E8A758B9C53C26BE251BBA /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0613231F777923C8B6B030D6 /* PBXTargetDependency */,
+			);
+			name = PeaceSwitchTests;
+			packageProductDependencies = (
+			);
+			productName = PeaceSwitchTests;
+			productReference = 33395CA282ABF72807A3F09E /* PeaceSwitchTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		C9222ACF2405663AF57762C8 /* PeaceSwitch */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B5A750C2DCCD4791E09D83B1 /* Build configuration list for PBXNativeTarget "PeaceSwitch" */;
+			buildPhases = (
+				F5D7634FF8AD4A7F7ED9A205 /* Sources */,
+				1E42B8B7A08F5D3199207A04 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PeaceSwitch;
+			packageProductDependencies = (
+			);
+			productName = PeaceSwitch;
+			productReference = 8BBFF06BA0BEA855A94BD473 /* PeaceSwitch.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		E44E9A0D5BE6A5BAE01AA278 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 285E00CB42814BE8A0021735 /* Build configuration list for PBXProject "PeaceSwitch" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 126EECB74615A57C5B304F3A;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 403464A92F1F5F26F888BE54 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C9222ACF2405663AF57762C8 /* PeaceSwitch */,
+				8267CB3BE3D024CF9E7AEDDB /* PeaceSwitchTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1E42B8B7A08F5D3199207A04 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1AB365E1CE5A3B58E470FC7B /* Assets.xcassets in Resources */,
+				6E95096E78CE4F499ADA66B8 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		80E8A758B9C53C26BE251BBA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				37AD34935D7C9189F6AA0ED8 /* PeaceSwitchTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F5D7634FF8AD4A7F7ED9A205 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6C87D118EE5AB6EF096EA1B0 /* AccountsListView.swift in Sources */,
+				AAA3FA3F7B421DB377F315AB /* CockpitDashboardView.swift in Sources */,
+				AA41E9DB2BF965BE3D6BA9E1 /* CockpitStore.swift in Sources */,
+				2DECA189998BA3305CD6F430 /* DemoStateEngine.swift in Sources */,
+				272129748DF1A8DBDA3C33FB /* KeychainStore.swift in Sources */,
+				F85B7C061763C0986E9AF841 /* MainTabView.swift in Sources */,
+				AD9FBDDB18936EC579BB888E /* OnboardingPairView.swift in Sources */,
+				C9865D9E0BA1C0B054E977D4 /* PeaceAPIClient.swift in Sources */,
+				22FE9C199278D9322A347084 /* PeaceModels.swift in Sources */,
+				B4D9B6A131E585AA025CA815 /* PeaceSwitchApp.swift in Sources */,
+				1D23E8A4693224810ED4F110 /* PeaceTheme.swift in Sources */,
+				34074927B3F7052CFE5471C8 /* QRScannerView.swift in Sources */,
+				3A40DDE29342E7CF6B7DB544 /* SettingsConnectionView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0613231F777923C8B6B030D6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = C9222ACF2405663AF57762C8 /* PeaceSwitch */;
+			targetProxy = 31EAB6E5370E1FB17829CB5C /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		05701F5A12F60505A5A914E7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.peaceclaude.switch.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PeaceSwitch.app/PeaceSwitch";
+			};
+			name = Debug;
+		};
+		61E915BD0FB6F6A6E56BA6CB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		64F7D6AAF71AE09886116934 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_ASSET_PATHS = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.peaceclaude.switch;
+				PRODUCT_NAME = PeaceSwitch;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		798FE62FC63C6BE05EE7D501 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.peaceclaude.switch.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PeaceSwitch.app/PeaceSwitch";
+			};
+			name = Release;
+		};
+		D93FEAA5616D987877064895 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.2.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		FB61125C75AE61CE0576332A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_ASSET_PATHS = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.peaceclaude.switch;
+				PRODUCT_NAME = PeaceSwitch;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0EE93361350034C725B1EA76 /* Build configuration list for PBXNativeTarget "PeaceSwitchTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				05701F5A12F60505A5A914E7 /* Debug */,
+				798FE62FC63C6BE05EE7D501 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		285E00CB42814BE8A0021735 /* Build configuration list for PBXProject "PeaceSwitch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D93FEAA5616D987877064895 /* Debug */,
+				61E915BD0FB6F6A6E56BA6CB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B5A750C2DCCD4791E09D83B1 /* Build configuration list for PBXNativeTarget "PeaceSwitch" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				64F7D6AAF71AE09886116934 /* Debug */,
+				FB61125C75AE61CE0576332A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = E44E9A0D5BE6A5BAE01AA278 /* Project object */;
+}

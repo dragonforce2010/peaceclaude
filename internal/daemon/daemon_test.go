@@ -637,3 +637,87 @@ func TestServiceAutostartAPI(t *testing.T) {
 		t.Fatal("expected ShouldAutoStartLaunchAgent=true after enabling via API")
 	}
 }
+
+func TestMobileExtendedStateAndActions(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_NO_LAUNCHD", "1")
+	t.Setenv("PEACECLAUDE_NO_SYS_PAC", "1")
+	srv := New(config.Default(), "/usr/bin/true")
+
+	// Pair a mobile client via internal RemoteManager
+	snapCfg := srv.configSnapshot()
+	qr, err := srv.remoteMgr.CreatePairTicket(context.Background(), &snapCfg, "127.0.0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, _, err := srv.remoteMgr.RedeemPair(qr.Code, "iPhone-Test", "iOS")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := srv.mobileHandler()
+
+	// 1. /mobile/api/state includes version, platform, upstream_route, browser_pac, doctor_summary.
+	reqState, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/mobile/api/state", nil)
+	reqState.Header.Set("Authorization", "Bearer "+tok)
+	rrState := newResponseRecorder()
+	handler.ServeHTTP(rrState, reqState)
+	if rrState.code != http.StatusOK {
+		t.Fatalf("/mobile/api/state HTTP %d: %s", rrState.code, rrState.body.String())
+	}
+	var st struct {
+		Version       string `json:"version"`
+		Platform      string `json:"platform"`
+		UpstreamRoute struct {
+			BypassEnabled bool `json:"bypass_enabled"`
+		} `json:"upstream_route"`
+		BrowserPAC struct {
+			PACURL string `json:"pac_url"`
+		} `json:"browser_pac"`
+		DoctorSummary struct {
+			CriticalTotal int `json:"critical_total"`
+		} `json:"doctor_summary"`
+	}
+	if err := json.Unmarshal(rrState.body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Platform == "" || st.BrowserPAC.PACURL == "" || st.DoctorSummary.CriticalTotal < 10 {
+		t.Fatalf("unexpected extended /mobile/api/state payload: %+v", st)
+	}
+
+	// 2. lock_gate -> lock_ui -> toggle_pac -> unlock_gate
+	postMobile := func(payload string) (int, map[string]any) {
+		req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/mobile/api/action", bytes.NewBufferString(payload))
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/json")
+		rr := newResponseRecorder()
+		handler.ServeHTTP(rr, req)
+		var m map[string]any
+		_ = json.Unmarshal(rr.body.Bytes(), &m)
+		return rr.code, m
+	}
+
+	c1, m1 := postMobile(`{"action":"lock_gate","reason":"test lock"}`)
+	if c1 != http.StatusOK || m1["ok"] != true {
+		t.Fatalf("lock_gate failed: %d %v", c1, m1)
+	}
+	if open, _ := srv.gate.AllowTraffic(); open {
+		t.Fatal("expected gate locked after mobile lock_gate")
+	}
+
+	c2, m2 := postMobile(`{"action":"lock_ui","locked":true}`)
+	if c2 != http.StatusOK || m2["ui_locked"] != true || !srv.uiLocked.Load() {
+		t.Fatalf("lock_ui failed: %d %v", c2, m2)
+	}
+	_, _ = postMobile(`{"action":"lock_ui","locked":false}`)
+
+	c3, m3 := postMobile(`{"action":"toggle_pac","enabled":false}`)
+	if c3 != http.StatusOK || m3["enabled"] != false {
+		t.Fatalf("toggle_pac=false failed: %d %v", c3, m3)
+	}
+
+	c4, m4 := postMobile(`{"action":"unlock_gate"}`)
+	if c4 != http.StatusOK || m4["ok"] != true {
+		t.Fatalf("unlock_gate failed: %d %v", c4, m4)
+	}
+}

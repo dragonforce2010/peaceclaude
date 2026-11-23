@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -329,6 +330,26 @@ func detectExpectedIPFromHost() string {
 	return strings.TrimSpace(string(raw))
 }
 
+func defaultClaudeDesktopPath() string {
+	switch runtime.GOOS {
+	case "windows":
+		if localApp := strings.TrimSpace(os.Getenv("LocalAppData")); localApp != "" {
+			return filepath.Join(localApp, "AnthropicClaude", "claude.exe")
+		}
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "AppData", "Local", "AnthropicClaude", "claude.exe")
+	case "linux":
+		for _, cand := range []string{"/usr/bin/claude-desktop", "/opt/Claude/claude-desktop"} {
+			if _, err := os.Stat(cand); err == nil {
+				return cand
+			}
+		}
+		return "/usr/bin/claude-desktop"
+	default:
+		return "/Applications/Claude.app"
+	}
+}
+
 func Default() *Config {
 	expectedIP := detectExpectedIPFromHost()
 	return &Config{
@@ -388,7 +409,7 @@ func Default() *Config {
 		},
 		Binaries: BinariesConfig{
 			ClaudeCLIPath:    "",
-			ClaudeDesktopApp: "/Applications/Claude.app",
+			ClaudeDesktopApp: defaultClaudeDesktopPath(),
 			LoginBrowserApp:  "",
 		},
 		Appearance: AppearanceConfig{

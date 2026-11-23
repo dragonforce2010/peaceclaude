@@ -489,3 +489,24 @@ func TestEnsureLaunchAgentIdempotentSkipAndRepair(t *testing.T) {
 		t.Fatalf("sandbox guard mismatch: res=%+v err=%v", res, err)
 	}
 }
+
+func TestCrossPlatformAutostartRenderers(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	unit := RenderSystemdUserUnit("/usr/bin/peaceclaude")
+	for _, want := range []string{`ExecStart="/usr/bin/peaceclaude" service run`, "WantedBy=default.target"} {
+		if !strings.Contains(unit, want) {
+			t.Fatalf("systemd unit missing %q:\n%s", want, unit)
+		}
+	}
+	if gotBin, ok := linuxSystemdUnitValid(unit, func(p string) bool { return p == "/usr/bin/peaceclaude" }); !ok || gotBin != "/usr/bin/peaceclaude" {
+		t.Fatalf("linuxSystemdUnitValid failed: bin=%q ok=%t", gotBin, ok)
+	}
+	if _, ok := linuxSystemdUnitValid(unit, func(string) bool { return false }); ok {
+		t.Fatal("linuxSystemdUnitValid must reject missing binary")
+	}
+
+	winCmd := RenderWindowsRunCommand(`C:\Program Files\PeaceClaude\peaceclaude.exe`)
+	if winCmd != `"C:\Program Files\PeaceClaude\peaceclaude.exe" service run` {
+		t.Fatalf("unexpected Windows Run command: %q", winCmd)
+	}
+}

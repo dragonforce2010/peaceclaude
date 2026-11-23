@@ -7,9 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"peaceclaude/internal/config"
@@ -22,14 +22,39 @@ func DetectLoginBrowser(cfg *config.Config) string {
 			return cfg.Binaries.LoginBrowserApp
 		}
 	}
-	candidates := []string{
-		"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-		"/Applications/Chromium.app/Contents/MacOS/Chromium",
-		"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-		"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-		"/Applications/Arc.app/Contents/MacOS/Arc",
+	var candidates []string
+	switch runtime.GOOS {
+	case "windows":
+		pf := os.Getenv("ProgramFiles")
+		pfx86 := os.Getenv("ProgramFiles(x86)")
+		localApp := os.Getenv("LocalAppData")
+		candidates = []string{
+			filepath.Join(pf, "Google/Chrome/Application/chrome.exe"),
+			filepath.Join(pfx86, "Google/Chrome/Application/chrome.exe"),
+			filepath.Join(localApp, "Google/Chrome/Application/chrome.exe"),
+			filepath.Join(pfx86, "Microsoft/Edge/Application/msedge.exe"),
+			filepath.Join(pf, "Microsoft/Edge/Application/msedge.exe"),
+			filepath.Join(pf, "BraveSoftware/Brave-Browser/Application/brave.exe"),
+		}
+	case "linux":
+		for _, binName := range []string{"google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "brave-browser", "microsoft-edge"} {
+			if p, err := exec.LookPath(binName); err == nil {
+				return p
+			}
+		}
+	default:
+		candidates = []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+			"/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+			"/Applications/Arc.app/Contents/MacOS/Arc",
+		}
 	}
 	for _, c := range candidates {
+		if strings.TrimSpace(c) == "" {
+			continue
+		}
 		if _, err := os.Stat(c); err == nil {
 			return c
 		}
@@ -190,7 +215,7 @@ func LaunchLoginBrowserWithPID(ctx context.Context, cfg *config.Config, selfBin,
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setDetachedProcessAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		if logFile != nil {
 			_ = logFile.Close()

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1145,18 +1145,31 @@ func OpenNativeBrowserExtensionGuide(browserID, extDir string) (GuideResult, err
 	home, _ := os.UserHomeDir()
 	appPath := findBrowserAppPath("/Applications", home, spec.AppBundle)
 	if appPath != "" {
-		_ = exec.Command("open", "-a", appPath).Run()
+		_ = openAppTarget(appPath)
+	} else if spec.ID == "chrome" || spec.ID == "edge" || spec.ID == "brave" {
+		if runtime.GOOS != "darwin" {
+			_ = openExternalTarget(spec.ExtensionsURL)
+		}
 	}
 	if _, err := os.Stat(extDir); err == nil {
-		_ = exec.Command("open", "-R", extDir).Run()
+		_ = revealPathInFileManager(extDir)
+	}
+
+	openHint := "直接在地址栏粘贴并打开"
+	dragHint := "直接把文件管理器已选中的 native-browser-shield 文件夹拖入扩展页空白处即载入"
+	if runtime.GOOS == "darwin" {
+		openHint = "在地址栏按 Cmd+L 粘贴并打开"
+		dragHint = fmt.Sprintf("最省事方式：直接把 Finder 已高亮选中的 native-browser-shield 文件夹拖入扩展页空白处即载入（因 .peaceclaude 默认隐藏，若点「加载已解压的扩展程序」，请在文件弹窗按 Cmd+Shift+G 粘贴：%s）", extDir)
+	} else {
+		dragHint = fmt.Sprintf("%s（或点击「加载已解压的扩展程序」选择目录：%s）", dragHint, extDir)
 	}
 
 	res.Steps = []string{
 		fmt.Sprintf("若使用 %s 多 Space / 多配置档，请先切到你平时访问 Claude 与 fuck-claude.app 的那个 Space（不同 Space 扩展互不共享）", spec.Name),
-		fmt.Sprintf("在地址栏按 Cmd+L 粘贴并打开 %s（已为你自动复制），开启右上角「开发者模式 (Developer mode)」", spec.ExtensionsURL),
-		fmt.Sprintf("最省事方式：直接把 Finder 已高亮选中的 native-browser-shield 文件夹拖入扩展页空白处即载入（因 .peaceclaude 默认隐藏，若点「加载已解压的扩展程序」，请在文件弹窗按 Cmd+Shift+G 粘贴：%s）", extDir),
+		fmt.Sprintf("%s %s（已为你自动复制），开启右上角「开发者模式 (Developer mode)」", openHint, spec.ExtensionsURL),
+		dragHint,
 		"切回本控制台点击「刷新检测状态」变成「全链路已护航」，随后回到 fuck-claude.app 点 RESCAN 即可达成 2/100 LOW RISK",
 	}
-	res.Message = fmt.Sprintf("已在 Finder 高亮打开 %s；请将该文件夹拖入 %s 的「开发者模式」页面（单纯重启浏览器不会自动加载）", extDir, spec.ExtensionsURL)
+	res.Message = fmt.Sprintf("已打开扩展目录 %s；请将该文件夹拖入 %s 的「开发者模式」页面（单纯重启浏览器不会自动加载）", extDir, spec.ExtensionsURL)
 	return res, nil
 }

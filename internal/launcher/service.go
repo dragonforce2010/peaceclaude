@@ -13,7 +13,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"peaceclaude/internal/config"
@@ -25,6 +24,7 @@ const LaunchAgentLabel = "com.peaceclaude.daemon"
 type ServiceStatus struct {
 	Running           bool   `json:"running"`
 	PID               int    `json:"pid,omitempty"`
+	Platform          string `json:"platform,omitempty"`
 	LaunchAgentPath   string `json:"launch_agent_path"`
 	LaunchAgentSet    bool   `json:"launch_agent_installed"`
 	LaunchAgentLoaded bool   `json:"launch_agent_loaded"`
@@ -81,9 +81,12 @@ func canManageHostLaunchAgent() bool {
 }
 
 // CanManageHostLaunchAgent reports whether this process is allowed to inspect
-// and mutate host macOS LaunchAgents (always false in tests/sandboxes or non-darwin OS).
+// and mutate host OS autostart registration (always false in tests/sandboxes).
 func CanManageHostLaunchAgent() bool {
-	return canManageHostLaunchAgent()
+	if runtime.GOOS == "darwin" {
+		return canManageHostLaunchAgent()
+	}
+	return canManageHostAutostartAnyOS()
 }
 
 func xmlEscapePlist(s string) string {
@@ -240,9 +243,12 @@ func DaemonHealth(cfg *config.Config) (bool, int) {
 	return out.OK, out.PID
 }
 
-// InspectLaunchAgentStatus inspects LaunchAgent installation, validity and launchd state
+// InspectLaunchAgentStatus inspects LaunchAgent / systemd / Windows Run autostart state
 // without making any self-referential HTTP calls, so /api/status inside daemon can call it safely.
 func InspectLaunchAgentStatus(cfg *config.Config, running bool, pid int) ServiceStatus {
+	if runtime.GOOS != "darwin" {
+		return inspectCrossPlatformAutostart(cfg, running, pid)
+	}
 	plist := LaunchAgentPath()
 	autoEnabled := cfg.ShouldAutoStartLaunchAgent()
 	var (
@@ -261,6 +267,7 @@ func InspectLaunchAgentStatus(cfg *config.Config, running bool, pid int) Service
 	return ServiceStatus{
 		Running:           running,
 		PID:               pid,
+		Platform:          runtime.GOOS,
 		LaunchAgentPath:   plist,
 		LaunchAgentSet:    installed,
 		LaunchAgentLoaded: loaded,
@@ -285,10 +292,35 @@ func InstallLaunchAgent(binPath string) (string, error) {
 	return InstallLaunchAgentPlistOnly(binPath)
 }
 
-// InstallLaunchAgentPlistOnly writes the LaunchAgent plist cleanly without restarting the active daemon.
+// InstallLaunchAgentPlistOnly writes the host OS autostart definition cleanly without restarting the active daemon.
 func InstallLaunchAgentPlistOnly(binPath string) (string, error) {
 	if err := config.EnsureDirs(); err != nil {
 		return "", err
+	}
+	if runtime.GOOS == "linux" {
+		if !canManageHostAutostartAnyOS() {
+			return LinuxSystemdUnitPath(), nil
+		}
+		unitPath := LinuxSystemdUnitPath()
+		if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(unitPath, []byte(RenderSystemdUserUnit(binPath)), 0o644); err != nil {
+			return "", err
+		}
+		if _, err := exec.LookPath("systemctl"); err == nil {
+			_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+			_ = exec.Command("systemctl", "--user", "enable", LinuxSystemdUnitName).Run()
+		}
+		return unitPath, nil
+	}
+	if runtime.GOOS == "windows" {
+		regPath := WindowsRunRegKey + `\` + WindowsRunValueName
+		if !canManageHostAutostartAnyOS() {
+			return regPath, nil
+		}
+		_ = exec.Command("reg", "add", WindowsRunRegKey, "/v", WindowsRunValueName, "/t", "REG_SZ", "/d", RenderWindowsRunCommand(binPath), "/f").Run()
+		return regPath, nil
 	}
 	resolved, ephemeral := resolveLaunchAgentBinary(binPath)
 	if !ephemeral && resolved != "" {
@@ -304,9 +336,12 @@ func InstallLaunchAgentPlistOnly(binPath string) (string, error) {
 	return plist, nil
 }
 
-// DisableLaunchAgentAutostart removes the host LaunchAgent plist so future logins do not auto-start,
+// DisableLaunchAgentAutostart removes the host autostart entry so future logins do not auto-start,
 // without killing the currently running daemon serving the Web UI HTTP request.
 func DisableLaunchAgentAutostart() error {
+	if runtime.GOOS != "darwin" {
+		return disableCrossPlatformAutostart()
+	}
 	if !canManageHostLaunchAgent() {
 		return nil
 	}
@@ -332,7 +367,7 @@ func stopBareDaemonForHandoff(cfg *config.Config) {
 	}
 	if raw, err := os.ReadFile(config.DaemonPIDPath()); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 1 {
-			_ = syscall.Kill(pid, syscall.SIGTERM)
+			_ = signalTermPID(pid)
 			time.Sleep(300 * time.Millisecond)
 		}
 	}
@@ -478,9 +513,12 @@ func ensureLaunchAgentWithOps(cfg *config.Config, binPath string, respectConfig 
 	return res, nil
 }
 
-// EnsureLaunchAgent idempotently checks LaunchAgent registration & daemon health on macOS,
-// installing/repairing/restarting as needed or returning Action="skipped" when already healthy.
+// EnsureLaunchAgent idempotently checks host autostart registration & daemon health across
+// macOS (LaunchAgent), Linux (systemd --user), and Windows (HKCU Run).
 func EnsureLaunchAgent(cfg *config.Config, binPath string, respectConfig bool) (EnsureLaunchAgentResult, error) {
+	if runtime.GOOS != "darwin" {
+		return ensureCrossPlatformAutostart(cfg, binPath, respectConfig)
+	}
 	return ensureLaunchAgentWithOps(cfg, binPath, respectConfig, defaultLaunchAgentOps(cfg))
 }
 
@@ -492,7 +530,7 @@ func startDetachedDaemon(cfg *config.Config, binPath string) error {
 	cmd := exec.Command(binPath, "service", "run")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setDetachedProcessAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		_ = logFile.Close()
 		return fmt.Errorf("start daemon: %w", err)
@@ -508,7 +546,7 @@ func startDetachedDaemon(cfg *config.Config, binPath string) error {
 }
 
 func StartService(cfg *config.Config, binPath string, useLaunchd bool) error {
-	if useLaunchd && canManageHostLaunchAgent() {
+	if useLaunchd && CanManageHostLaunchAgent() {
 		if err := config.EnsureDirs(); err != nil {
 			return err
 		}
@@ -558,7 +596,7 @@ func StopService(cfg *config.Config) error {
 
 	if raw, err := os.ReadFile(config.DaemonPIDPath()); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 1 {
-			_ = syscall.Kill(pid, syscall.SIGTERM)
+			_ = signalTermPID(pid)
 		}
 	}
 	_ = os.Remove(config.DaemonPIDPath())

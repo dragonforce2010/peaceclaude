@@ -5,17 +5,17 @@
 <h1 align="center">PeaceClaude</h1>
 
 <p align="center">
-  <strong>Zero-VM, Fail-Closed Static-IP Cockpit for Claude on macOS.</strong><br/>
-  Run Claude Desktop, Claude Code CLI, and your everyday Arc / Chrome / Brave browsers at native speed — locked to your static US egress IP, synced timezone/locale, and verified <code>2 / 100 LOW RISK</code> anti-fingerprint posture.
+  <strong>Zero-VM, Fail-Closed Static-IP Cockpit across macOS, Windows, Ubuntu, Web, and iOS.</strong><br/>
+  Run Claude Desktop, Claude Code CLI, and your everyday Arc / Chrome / Brave browsers at native speed — locked to your static US egress IP, synced timezone/locale, verified <code>2 / 100 LOW RISK</code> posture, and synced with the native <strong>PeaceSwitch</strong> iOS companion.
 </p>
 
 <p align="center">
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="docs/CLI_GUIDE.md">CLI Guide</a> · <a href="website/index.html">Official Landing Page</a>
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="docs/CLI_GUIDE.md">CLI Guide</a> · <a href="website/index.html">Landing Page</a> · <a href="ios/APP_STORE_GUIDE.md">iOS App (PeaceSwitch)</a> · <a href="docs/DEPLOYMENT_GUIDE.md">Site Hosting</a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-v0.2.0-D97757?style=flat-square" alt="Version v0.2.0" />
-  <img src="https://img.shields.io/badge/macOS-Universal%20(arm64%20%2B%20x86__64)-18181B?style=flat-square&logo=apple" alt="macOS Universal" />
+  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Ubuntu%20%7C%20iOS-18181B?style=flat-square" alt="macOS Windows Ubuntu iOS" />
   <img src="https://img.shields.io/badge/footprint-~18MB%20RAM%20%7C%200%20VM-10B981?style=flat-square" alt="Zero VM ~18MB RAM" />
   <img src="https://img.shields.io/badge/Go-100%25%20Stdlib%20Zero--Deps-00ADD8?style=flat-square&logo=go" alt="Zero Dependencies Go" />
   <img src="https://img.shields.io/badge/egress-Fail--Closed%20%2B%20pf-0D9488?style=flat-square" alt="Fail-Closed + pf" />
@@ -127,6 +127,14 @@ Download from **GitHub Releases**:
 chmod +x ./install.sh
 ./install.sh
 ```
+
+### Option C: 3-Platform Ecosystem Matrix
+
+| Surface | Platform Coverage | Packaging & Key Capability | Guide |
+|---|---|---|---|
+| **Desktop / CLI Daemon** | macOS (`arm64`+`amd64`), Windows 10/11 (`amd64`+`arm64`), Ubuntu Linux (`amd64`+`arm64`) | `./scripts/package-all-platforms.sh` emits `.zip`, `.tar.gz`, `.deb`; native LaunchAgent / Registry Run / `systemd --user` autostart + scoped PAC | [CLI Guide](docs/CLI_GUIDE.md) |
+| **iOS Mobile Companion** | iOS 17+ Native SwiftUI (**PeaceSwitch**) | AVFoundation QR pairing, iOS Keychain, haptic Fail-Closed Lock, Pro/Max vs Free quota meters, Interactive Demo Mode | [App Store Guide](ios/APP_STORE_GUIDE.md) |
+| **Standalone Website** | Static HTML/CSS/JS (`website/`) | Warm Swiss Atelier showcase, 4-platform interactive quickstart, FAQ, Vercel & GitHub Pages deploy (`peace-claude.app`) | [Deployment Guide](docs/DEPLOYMENT_GUIDE.md) |
 
 Installed layout (all existing user accounts & `~/.claude` remain strictly untouched):
 - **CLI**: `~/.local/bin/peaceclaude` & short alias `pclaude`

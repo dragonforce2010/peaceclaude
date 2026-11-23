@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"peaceclaude/internal/profile"
 	"peaceclaude/internal/remote"
 	"peaceclaude/internal/ui"
+	"peaceclaude/internal/version"
 )
 
 type StorageSummary struct {
@@ -463,12 +465,28 @@ func (s *Server) handleMobileState(w http.ResponseWriter, r *http.Request) {
 			"usage":               usage,
 		})
 	}
+	hostName, _ := os.Hostname()
+	docCtx, docCancel := context.WithTimeout(r.Context(), 4*time.Second)
+	docRep := host.RunDoctor(docCtx, &cfg, true, s.gate.Snapshot())
+	docCancel()
+
 	writeJSON(w, http.StatusOK, map[string]any{
+		"version":        version.Version,
+		"platform":       runtime.GOOS,
+		"host_name":      hostName,
 		"gate":           s.gate.Snapshot(),
 		"stats":          s.audit.Stats(),
 		"active_profile": cfg.ActiveProfile,
 		"ui_locked":      s.uiLocked.Load(),
-		"accounts":       accounts,
+		"upstream_route": s.gateway.UpstreamRouteStatus(),
+		"browser_pac":    host.InspectBrowserPAC(&cfg),
+		"doctor_summary": map[string]any{
+			"score":           docRep.Score,
+			"grade":           docRep.Grade,
+			"critical_passed": docRep.CriticalPassed,
+			"critical_total":  docRep.CriticalTotal,
+		},
+		"accounts": accounts,
 	})
 }
 
@@ -478,8 +496,11 @@ func (s *Server) handleMobileAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Action  string `json:"action"` // set_active | launch_desktop | stop_desktop | check_gate | lock_ui
+		Action  string `json:"action"` // set_active | launch_desktop | stop_desktop | check_gate | lock_gate | unlock_gate | lock_ui | toggle_pac
 		Profile string `json:"profile"`
+		Locked  *bool  `json:"locked"`
+		Enabled *bool  `json:"enabled"`
+		Reason  string `json:"reason"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -542,6 +563,72 @@ func (s *Server) handleMobileAction(w http.ResponseWriter, r *http.Request) {
 		res := s.gate.Check(ctx, false)
 		cancel()
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "result": res, "gate": s.gate.Snapshot()})
+	case "lock_gate":
+		reason := strings.TrimSpace(body.Reason)
+		if reason == "" {
+			reason = "Locked from mobile PeaceSwitch remote"
+		}
+		s.gate.SetManualLock(true, reason)
+		closed := s.gateway.CloseProtectedConns()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":           true,
+			"closed_conns": closed,
+			"gate":         s.gate.Snapshot(),
+		})
+	case "unlock_gate":
+		s.gate.SetManualLock(false, "")
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		res := s.gate.Check(ctx, false)
+		cancel()
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":     true,
+			"result": res,
+			"gate":   s.gate.Snapshot(),
+		})
+	case "lock_ui":
+		want := !s.uiLocked.Load()
+		if body.Locked != nil {
+			want = *body.Locked
+		}
+		s.uiLocked.Store(want)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":        true,
+			"ui_locked": want,
+		})
+	case "toggle_pac":
+		curPAC := host.InspectBrowserPAC(&cfg)
+		want := !curPAC.MatchesPeace
+		if body.Enabled != nil {
+			want = *body.Enabled
+		}
+		s.mu.Lock()
+		next := *s.cfg
+		next.Listen.AutoEnableBrowserPAC = &want
+		next.Listen.BrowserPACPaused = !want
+		if err := config.Save(&next); err != nil {
+			s.mu.Unlock()
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		s.swapConfigLocked(next)
+		s.mu.Unlock()
+
+		var pacSt host.BrowserPACStatus
+		if os.Getenv("PEACECLAUDE_HOME") == "" && os.Getenv("PEACECLAUDE_NO_SYS_PAC") == "" {
+			var pacErr error
+			pacSt, _, pacErr = host.SetSystemBrowserPAC(&next, want, false)
+			if pacErr != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": pacErr.Error()})
+				return
+			}
+		} else {
+			pacSt = host.InspectBrowserPAC(&next)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":          true,
+			"enabled":     want,
+			"browser_pac": pacSt,
+		})
 	default:
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported mobile action"})
 	}

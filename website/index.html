@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PeaceClaude — Zero-VM Static-IP Cockpit for Claude on macOS</title>
-  <meta name="description" content="Zero-VM, Fail-Closed static-IP control cockpit for Claude Desktop, Claude Code CLI, and native Arc/Chrome browsers on macOS." />
+  <title>PeaceClaude — Multi-Platform Zero-VM Static-IP Security Cockpit</title>
+  <meta name="description" content="Zero-VM, Fail-Closed static-IP control cockpit across macOS, Windows, Ubuntu Linux, Local Web, and iOS PeaceSwitch." />
   <link rel="icon" type="image/png" href="assets/peace-logo.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -19,9 +19,11 @@
 
       <nav class="nav-links" aria-label="Primary">
         <a href="#switch-lab" data-i18n="nav_arch">Cockpit</a>
-        <a href="#benchmark" data-i18n="nav_compare">Zero-VM</a>
+        <a href="#guide" data-i18n="nav_guide">Quickstart</a>
+        <a href="#ecosystem" data-i18n="nav_ecosystem">3-Platform</a>
         <a href="#surfaces" data-i18n="nav_surfaces">Shields</a>
         <a href="#showcase" data-i18n="nav_preview">Showcase</a>
+        <a href="#faq" data-i18n="nav_faq">FAQ</a>
         <a href="#download" data-i18n="nav_download">Install</a>
       </nav>
 
@@ -32,7 +34,7 @@
         <button type="button" class="pill-btn icon-only" id="btn-theme-toggle" aria-label="Toggle theme" title="Toggle Light / Dark theme">
           <span id="theme-icon">◐</span>
         </button>
-        <a class="btn btn-primary btn-sm" href="#download" data-i18n="cta_download_short">Get v0.2.0</a>
+        <a class="btn btn-primary btn-sm" href="#guide" data-i18n="cta_download_short">Quickstart</a>
       </div>
     </div>
   </header>
@@ -44,17 +46,17 @@
         <div class="hero-copy">
           <div class="eyebrow-chip">
             <span class="pulse-dot"></span>
-            <span data-i18n="hero_eyebrow">macOS Universal (arm64 + x86_64) · ~18 MB Zero-VM Architecture</span>
+            <span data-i18n="hero_eyebrow">macOS · Windows · Ubuntu · iOS PeaceSwitch · ~18 MB Zero-VM</span>
           </div>
 
-          <h1 data-i18n="hero_title">Native macOS Speed.<br/>Deterministic Static-IP Safety.</h1>
+          <h1 data-i18n="hero_title">Native OS Speed.<br/>Deterministic Static-IP Safety.</h1>
 
           <p class="hero-lead" data-i18n="hero_lead">
-            Ditch the 8 GB Linux VM without risking naked proxy leaks. PeaceClaude wraps Claude Desktop, Claude Code CLI, and your native Arc &amp; Chrome browsers in a Fail-Closed static-IP gate, synced US timezone/locale, and verified 2/100 anti-fingerprint shield.
+            Ditch the 8 GB Linux VM without risking naked proxy leaks. PeaceClaude wraps Claude Desktop, Claude Code CLI, and your native Arc &amp; Chrome browsers in a Fail-Closed static-IP gate across macOS, Windows, and Ubuntu — paired with our native PeaceSwitch iOS companion app.
           </p>
 
           <div class="hero-cta-row">
-            <a class="btn btn-primary btn-lg" href="#download" data-i18n="hero_cta_primary">Download Universal DMG</a>
+            <a class="btn btn-primary btn-lg" href="#guide" data-i18n="hero_cta_primary">Read 4-Platform Guide</a>
             <button type="button" class="btn btn-secondary btn-lg" id="btn-hero-copy">
               <code id="hero-copy-cmd">./install.sh</code>
               <span class="copy-tag" id="hero-copy-tag" data-i18n="copy_label">Copy</span>
@@ -142,6 +144,123 @@
             </div>
           </div>
         </aside>
+      </div>
+    </section>
+
+    <!-- Interactive 4-Platform Quickstart Guide -->
+    <section class="section alt-band" id="guide">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker" data-i18n="guide_kicker">INTERACTIVE QUICKSTART PLAYBOOK</div>
+          <h2 data-i18n="guide_title">Up and guarded across 4 platforms in under 2 minutes.</h2>
+          <p data-i18n="guide_desc">Select your platform below for step-by-step setup: install daemon, bind your static residential egress, shield your desktop/CLI/browser, and pair PeaceSwitch on iPhone.</p>
+        </div>
+
+        <div class="guide-shell">
+          <div class="guide-tabs" id="guide-tabs" role="tablist">
+            <button type="button" class="guide-tab active" data-platform="macos">macOS (Universal)</button>
+            <button type="button" class="guide-tab" data-platform="windows">Windows 10 / 11</button>
+            <button type="button" class="guide-tab" data-platform="ubuntu">Ubuntu Linux (.deb)</button>
+            <button type="button" class="guide-tab" data-platform="ios">iOS PeaceSwitch</button>
+          </div>
+
+          <div class="guide-steps-grid" id="guide-steps-grid"></div>
+
+          <div class="guide-cmd-bar">
+            <div class="guide-cmd-label" id="guide-cmd-label">macOS Quick Commands</div>
+            <div class="guide-cmd-row">
+              <pre class="guide-cmd-pre" id="guide-cmd-code"><code></code></pre>
+              <button type="button" class="btn btn-primary btn-sm" id="btn-copy-guide" data-i18n="ins_copy">Copy Steps</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3-Platform Unified Ecosystem + Interactive iOS Phone Mockup -->
+    <section class="section" id="ecosystem">
+      <div class="container eco-grid">
+        <div class="eco-copy">
+          <div class="section-kicker" data-i18n="eco_kicker">3-PLATFORM ECOSYSTEM</div>
+          <h2 data-i18n="eco_title">One static-IP brain. Every screen in sync.</h2>
+          <p class="eco-lead" data-i18n="eco_desc">Manage accounts and fail-closed locks wherever you are — native SwiftUI on iOS, local browser console on desktop, and cross-platform Go CLI/daemon across macOS, Windows, and Ubuntu.</p>
+
+          <div class="eco-cards">
+            <article class="eco-card">
+              <div class="eco-badge">01 · PC</div>
+              <div>
+                <h3 data-i18n="eco_pc_t">macOS · Windows · Ubuntu Linux</h3>
+                <p data-i18n="eco_pc_d">Unified single-binary Go daemon (<code>peaceclaude</code>), OS-native autostart (LaunchAgent / Registry Run / systemd --user), scoped browser PAC, and macOS physical interface VPN bypass (<code>IP_BOUND_IF</code>).</p>
+              </div>
+            </article>
+            <article class="eco-card">
+              <div class="eco-badge">02 · iOS</div>
+              <div>
+                <h3 data-i18n="eco_ios_t">PeaceSwitch for iPhone (Pure SwiftUI)</h3>
+                <p data-i18n="eco_ios_d">100% native SwiftUI with AVFoundation QR pairing, iOS Keychain tokens, haptic Fail-Closed Kill Switch, live Pro/Max vs Free quota readout, and zero-server Interactive Demo Mode.</p>
+              </div>
+            </article>
+            <article class="eco-card">
+              <div class="eco-badge">03 · WEB</div>
+              <div>
+                <h3 data-i18n="eco_web_t">Embedded Local Workbench (`:18899`)</h3>
+                <p data-i18n="eco_web_d">Runs seamlessly offline inside your loopback interface with 11-point Security Doctor, Appearance Studio themes, 403 network/auth triage, and one-click MV3 native browser setup.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <!-- Original Interactive Native iPhone Frame for PeaceSwitch -->
+        <div class="ios-stage" aria-label="Interactive PeaceSwitch iOS Companion Preview">
+          <div class="iphone-chassis" id="ios-mockup" data-locked="false">
+            <div class="iphone-island"></div>
+            <div class="iphone-screen">
+              <div class="ios-statusbar">
+                <span class="mono">09:41</span>
+                <span class="ios-pill-ver">iOS 17+</span>
+              </div>
+
+              <div class="ios-app-head">
+                <div>
+                  <strong data-i18n="ios_mock_title">PeaceSwitch Cockpit</strong>
+                  <small class="mono" id="ios-host-sub">studio-macbook · Doctor 100</small>
+                </div>
+                <span class="ios-gate-pill" id="ios-gate-pill">OPEN</span>
+              </div>
+
+              <div class="ios-egress-card">
+                <div class="ios-egress-lbl" data-i18n="ios_mock_ip_lbl">Verified Static Egress</div>
+                <div class="ios-egress-ip mono" id="ios-egress-ip">198.51.100.42</div>
+                <div class="ios-egress-meta mono" id="ios-egress-meta">Cheyenne, US · en0 Bypass · 84 ms</div>
+                <button type="button" class="ios-lock-btn" id="btn-ios-lock" data-i18n="ios_mock_lock_btn">Trigger Emergency Lock</button>
+              </div>
+
+              <div class="ios-accounts-wrap">
+                <div class="ios-sec-title" data-i18n="ios_mock_acc_lbl">Isolated Accounts (Tap to Switch)</div>
+                <button type="button" class="ios-acc-row active" data-ios-acc="alpha">
+                  <div>
+                    <strong>Alpha Studio <span class="ios-plan">Pro</span></strong>
+                    <small data-i18n="ios_mock_q1">5h 38% · Weekly 54%</small>
+                  </div>
+                  <span class="ios-active-tag" data-i18n="ios_mock_active">ACTIVE</span>
+                </button>
+                <button type="button" class="ios-acc-row" data-ios-acc="gamma">
+                  <div>
+                    <strong>Gamma Sandbox <span class="ios-plan">Free</span></strong>
+                    <small data-i18n="ios_mock_q2">Free tier · no 5h/Weekly bucket</small>
+                  </div>
+                  <span class="ios-active-tag muted" data-i18n="ios_mock_standby">STANDBY</span>
+                </button>
+              </div>
+
+              <div class="ios-tabbar">
+                <span class="active" data-i18n="ios_tab_cockpit">Cockpit</span>
+                <span data-i18n="ios_tab_accounts">Accounts</span>
+                <span data-i18n="ios_tab_security">Security</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -314,7 +433,40 @@
       </div>
     </section>
 
-    <!-- Honest Boundaries + 30s Install -->
+    <!-- FAQ Accordion Section -->
+    <section class="section alt-band" id="faq">
+      <div class="container">
+        <div class="section-head">
+          <div class="section-kicker" data-i18n="faq_kicker">FREQUENTLY ASKED QUESTIONS</div>
+          <h2 data-i18n="faq_title">Everything engineers ask before switching.</h2>
+        </div>
+
+        <div class="faq-list">
+          <details class="faq-item" open>
+            <summary data-i18n="faq_q1">Will PeaceClaude slow down Slack, Lark, or normal browsing?</summary>
+            <p data-i18n="faq_a1">No. Our PAC file and domain-scoped MV3 Shield match only Claude/Anthropic hostnames (<code>claude.ai</code>, <code>claude.com</code>, <code>anthropic.com</code>, <code>claudeusercontent.com</code>, and <code>fuck-claude.app</code>). Corporate intranets, video calls, and general tabs bypass the proxy directly and retain your native timezone.</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="faq_q2">Can I run PeaceClaude alongside a corporate VPN?</summary>
+            <p data-i18n="faq_a2">Yes. Unlike TUN-based proxy apps that hijack the global routing table, PeaceClaude uses targeted loopback ports plus macOS <code>IP_BOUND_IF</code> physical interface binding so static US upstream probes and Claude sessions bypass corporate VPN interference cleanly.</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="faq_q3">What operating systems and browsers are supported?</summary>
+            <p data-i18n="faq_a3">Desktop/CLI runs natively on macOS Universal (<code>arm64</code> + <code>x86_64</code>), Windows 10/11 (<code>amd64</code> + <code>arm64</code>), and Ubuntu/Debian Linux (<code>.deb</code> &amp; <code>tar.gz</code>). Native browser shielding works with Arc, Google Chrome, Brave, and Microsoft Edge.</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="faq_q4">How can I test the PeaceSwitch iOS app before setting up a server?</summary>
+            <p data-i18n="faq_a4">Launch PeaceSwitch on iPhone and tap "Launch Interactive Demo Mode" on the pairing screen. You can test profile switching, Pro/Max vs Free quota display, emergency fail-closed gate locks, and PAC toggles completely offline with zero server setup.</p>
+          </details>
+          <details class="faq-item">
+            <summary data-i18n="faq_q5">How do I host this website on peace-claude.app while keeping my repo private?</summary>
+            <p data-i18n="faq_a5">The <code>website/</code> folder has zero build dependencies. Deploy it directly via Vercel or Cloudflare Pages with Root Directory set to <code>website</code> and bind your <code>peace-claude.app</code> DNS records—your GitHub source repo can stay Private permanently. GitHub Pages workflow <code>.github/workflows/pages.yml</code> is also included.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- Honest Boundaries + 4-Platform Download -->
     <section class="section" id="download">
       <div class="container download-grid">
         <div class="boundary-card">
@@ -322,29 +474,31 @@
           <h2 data-i18n="bnd_title">Transparent about what Zero-VM covers — and doesn't.</h2>
           <ul class="boundary-list">
             <li data-i18n="bnd_1"><strong>Network &amp; Fingerprint Guarantee:</strong> Fail-Closed static-IP routing, kernel <code>pf</code> IPv4/IPv6/UDP killswitch, isolated profile paths, host env scrubbing, and domain-scoped timezone/locale/CJK-font alignment.</li>
-            <li data-i18n="bnd_2"><strong>Same macOS UID Boundary:</strong> Unlike a hardware hypervisor VM, processes run under your macOS user account and share normal workspace file permissions — pair with OS permissions or containers if executing untrusted code.</li>
-            <li data-i18n="bnd_3"><strong>Native Browser Opt-In:</strong> Modern macOS Chromium/Arc blocks silent unsigned extension injection; PeaceClaude generates the auditable MV3 folder locally and guides a 10-second developer-mode load.</li>
+            <li data-i18n="bnd_2"><strong>Same OS UID Boundary:</strong> Unlike a hardware hypervisor VM, processes run under your user account and share normal workspace file permissions — pair with OS permissions or containers if executing untrusted code.</li>
+            <li data-i18n="bnd_3"><strong>Native Browser Opt-In:</strong> Modern Chromium/Arc blocks silent unsigned extension injection; PeaceClaude generates the auditable MV3 folder locally and guides a 10-second developer-mode load.</li>
           </ul>
         </div>
 
         <div class="install-card">
-          <div class="section-kicker" data-i18n="ins_kicker">30-SECOND INSTALL · v0.2.0</div>
-          <h2 data-i18n="ins_title">Ready for Apple Silicon &amp; Intel Macs.</h2>
+          <div class="section-kicker" data-i18n="ins_kicker">4-PLATFORM RELEASES · v0.2.0</div>
+          <h2 data-i18n="ins_title">Deploy everywhere your Claude workflow runs.</h2>
 
           <div class="install-tabs" id="install-tabs">
-            <button type="button" class="ins-tab active" data-mode="dmg">Universal DMG</button>
-            <button type="button" class="ins-tab" data-mode="tar">Offline tar.gz</button>
-            <button type="button" class="ins-tab" data-mode="src">Build from Source</button>
+            <button type="button" class="ins-tab active" data-mode="macos">macOS Universal</button>
+            <button type="button" class="ins-tab" data-mode="windows">Windows (.exe/.zip)</button>
+            <button type="button" class="ins-tab" data-mode="ubuntu">Ubuntu (.deb/.tar.gz)</button>
+            <button type="button" class="ins-tab" data-mode="ios">iOS (PeaceSwitch)</button>
           </div>
 
-          <pre class="install-code" id="install-code"><code># 1. Download PeaceClaude-v0.2.0-macos-universal.dmg from GitHub Releases
-# 2. Drag PeaceClaude.app into Applications &amp; run Install-PeaceClaude-CLI.command
-# 3. Verify checksum &amp; clear ad-hoc quarantine if prompted:
-xattr -dr com.apple.quarantine /Applications/PeaceClaude.app</code></pre>
+          <pre class="install-code" id="install-code"><code># macOS Universal (Apple Silicon + Intel)
+tar -xzf peaceclaude-v0.2.0-darwin-universal.tar.gz
+cd peaceclaude-v0.2.0-darwin-universal
+./install.sh
+peaceclaude status --check</code></pre>
 
           <div class="install-foot">
             <button type="button" class="btn btn-primary" id="btn-copy-install" data-i18n="ins_copy">Copy Steps</button>
-            <a class="btn btn-ghost" href="../README.md" data-i18n="ins_docs">Read Full Docs</a>
+            <a class="btn btn-ghost" href="https://github.com/dragonforce2010/peaceclaude" target="_blank" rel="noopener" data-i18n="ins_docs">GitHub Repository</a>
           </div>
         </div>
       </div>
@@ -356,12 +510,14 @@ xattr -dr com.apple.quarantine /Applications/PeaceClaude.app</code></pre>
       <div class="footer-brand">
         <img src="assets/peace-logo.png" alt="" width="22" height="22" />
         <span>PeaceClaude v0.2.0</span>
-        <span class="muted" data-i18n="foot_note">Zero-VM Static-IP Security Cockpit for macOS</span>
+        <span class="muted" data-i18n="foot_note">Cross-Platform Zero-VM Static-IP Security Cockpit</span>
       </div>
       <div class="footer-links">
-        <a href="../README.md">README (EN)</a>
-        <a href="../README.zh-CN.md">简体中文文档</a>
-        <a href="../docs/CLI_GUIDE.md">CLI Guide</a>
+        <a href="https://github.com/dragonforce2010/peaceclaude/blob/main/README.md" target="_blank" rel="noopener">README (EN)</a>
+        <a href="https://github.com/dragonforce2010/peaceclaude/blob/main/README.zh-CN.md" target="_blank" rel="noopener">简体中文文档</a>
+        <a href="https://github.com/dragonforce2010/peaceclaude/blob/main/docs/CLI_GUIDE.md" target="_blank" rel="noopener">CLI Guide</a>
+        <a href="https://github.com/dragonforce2010/peaceclaude/blob/main/ios/APP_STORE_GUIDE.md" target="_blank" rel="noopener">iOS App Guide</a>
+        <a href="https://github.com/dragonforce2010/peaceclaude/blob/main/docs/DEPLOYMENT_GUIDE.md" target="_blank" rel="noopener">Hosting</a>
       </div>
     </div>
   </footer>

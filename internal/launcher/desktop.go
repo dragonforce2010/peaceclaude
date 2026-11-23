@@ -12,9 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"peaceclaude/internal/config"
@@ -58,9 +58,13 @@ type DesktopSpec struct {
 }
 
 func BuildDesktopSpec(cfg *config.Config, prof *profile.Profile, gate egress.GateSnapshot, extraArgs []string) (*DesktopSpec, error) {
-	bin := filepath.Join(cfg.Binaries.ClaudeDesktopApp, "Contents/MacOS/Claude")
+	appTarget := strings.TrimSpace(cfg.Binaries.ClaudeDesktopApp)
+	bin := appTarget
+	if runtime.GOOS == "darwin" || strings.HasSuffix(strings.ToLower(appTarget), ".app") {
+		bin = filepath.Join(appTarget, "Contents/MacOS/Claude")
+	}
 	if _, err := os.Stat(bin); err != nil {
-		return nil, fmt.Errorf("未找到 Claude Desktop (%s)，请确认已安装 Claude.app", bin)
+		return nil, fmt.Errorf("未找到 Claude Desktop (%s)，请确认已安装桌面客户端", bin)
 	}
 	lang := cfg.Identity.Language
 	if prof.Language != "" {
@@ -83,8 +87,9 @@ func BuildDesktopSpec(cfg *config.Config, prof *profile.Profile, gate egress.Gat
 		"--lang=" + lang,
 		"--accept-lang=" + lang + ",en;q=0.9",
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
-		"-AppleLanguages", fmt.Sprintf("(%s)", lang),
-		"-AppleLocale", appleLocale,
+	}
+	if runtime.GOOS == "darwin" {
+		args = append(args, "-AppleLanguages", fmt.Sprintf("(%s)", lang), "-AppleLocale", appleLocale)
 	}
 	if cfg.Identity.DisableDesktopQUIC {
 		args = append(args, "--disable-quic")
@@ -189,7 +194,7 @@ func LaunchDesktopWithOptions(ctx context.Context, cfg *config.Config, selfBin, 
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile
 	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setDetachedProcessAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		if logFile != nil {
 			_ = logFile.Close()
@@ -385,30 +390,7 @@ func TerminatePIDs(pids []string, wait time.Duration) int {
 	if len(numeric) == 0 {
 		return 0
 	}
-	for _, pid := range numeric {
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-	}
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		alive := false
-		for _, pid := range numeric {
-			if syscall.Kill(pid, 0) == nil {
-				alive = true
-				break
-			}
-		}
-		if !alive {
-			return len(numeric)
-		}
-		time.Sleep(150 * time.Millisecond)
-	}
-	for _, pid := range numeric {
-		if syscall.Kill(pid, 0) == nil {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
-	}
-	time.Sleep(250 * time.Millisecond)
-	return len(numeric)
+	return terminatePIDNumeric(numeric, wait)
 }
 
 // cfBundleBuildVersion normalizes a semver string into a pure numeric CFBundleVersion.

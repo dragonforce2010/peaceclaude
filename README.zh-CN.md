@@ -5,18 +5,18 @@
 <h1 align="center">PeaceClaude</h1>
 
 <p align="center">
-  <strong>省心、放心的 macOS 零虚拟机静态 IP Claude 全入口安全工作台</strong><br/>
+  <strong>覆盖 macOS · Windows · Ubuntu · Web · iOS 的零虚拟机静态 IP Claude 全入口安全工作台</strong><br/>
   零虚拟机开销，同时纳管 Claude Desktop、Claude Code CLI 与原生 Arc / Chrome / Brave 浏览器：<br/>
-  严格锁定静态美区 IP、实时同步城域时区语言、实测防风控检测稳居 <code>2 / 100 LOW RISK</code>。
+  严格锁定静态美区 IP、实时同步城域时区语言、实测防风控检测稳居 <code>2 / 100 LOW RISK</code>，并配备纯原生 SwiftUI 伴侣应用 <strong>PeaceSwitch</strong>。
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="docs/CLI_GUIDE.md">CLI 完整指南</a> · <a href="website/index.html">官方介绍落地页</a>
+  <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="docs/CLI_GUIDE.md">CLI 完整指南</a> · <a href="website/index.html">独立介绍官网</a> · <a href="ios/APP_STORE_GUIDE.md">iOS 上架指南</a> · <a href="docs/DEPLOYMENT_GUIDE.md">官网托管指南</a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/版本-v0.2.0-D97757?style=flat-square" alt="Version v0.2.0" />
-  <img src="https://img.shields.io/badge/macOS-Universal%20(arm64%20%2B%20x86__64)-18181B?style=flat-square&logo=apple" alt="macOS Universal" />
+  <img src="https://img.shields.io/badge/全平台-macOS%20%7C%20Windows%20%7C%20Ubuntu%20%7C%20iOS-18181B?style=flat-square" alt="macOS Windows Ubuntu iOS" />
   <img src="https://img.shields.io/badge/资源占用-~18MB%20内存%20%7C%20零虚拟机-10B981?style=flat-square" alt="Zero VM ~18MB RAM" />
   <img src="https://img.shields.io/badge/Go-零第三方依赖标准库-00ADD8?style=flat-square&logo=go" alt="Zero Dependencies Go" />
   <img src="https://img.shields.io/badge/出站门禁-Fail--Closed%20%2B%20pf-0D9488?style=flat-square" alt="Fail-Closed + pf" />
@@ -128,6 +128,14 @@ flowchart LR
 chmod +x ./install.sh
 ./install.sh
 ```
+
+### 方式 C：三端协同生态一览（PC / iOS / 独立官网）
+
+| 端别 | 平台覆盖 | 产物与核心能力 | 说明文档 |
+|---|---|---|---|
+| **PC 桌面与命令行** | macOS (`arm64`+`amd64`)、Windows 10/11 (`amd64`+`arm64`)、Ubuntu Linux (`amd64`+`arm64`) | `./scripts/package-all-platforms.sh` 自动构建 `.zip` / `.tar.gz` / `.deb`；各系统原生开机自启 + 域内 PAC + 物理网卡旁路 | [CLI 指南](docs/CLI_GUIDE.md) |
+| **iOS 伴侣应用** | iOS 17+ 原生 SwiftUI（**PeaceSwitch**） | AVFoundation QR 扫码、iOS Keychain 凭证、震动紧急熔断、多账号余量监控与零服务端 Demo Mode | [iOS 上架指南](ios/APP_STORE_GUIDE.md) |
+| **独立介绍官网** | 纯静态零构建 HTML/CSS/JS（`website/`） | 四端交互式安装教程、三端协同与可交互 iPhone 原型、FAQ 问答，支持 `peace-claude.app` Vercel / GitHub Pages 部署 | [官网部署指南](docs/DEPLOYMENT_GUIDE.md) |
 
 安装产物与目录权限说明（**绝不修改宿主机既有 `~/.claude` 与原生 Desktop 数据**）：
 - **命令行入口**：`~/.local/bin/peaceclaude` 与短别名 `pclaude`

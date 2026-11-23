@@ -347,15 +347,18 @@ if [[ "$APP_CODE" == "200" && "$APP_LEGACY_CODE" == "200" && "$PAIR_JSON" == *"<
     "http://127.0.0.1:29900/mobile/api/redeem")"
   MOB_TOK="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("token",""))' <<<"$REDEEM_JSON")"
   DEV_ID="$(python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("device",{}).get("id",""))' <<<"$REDEEM_JSON")"
-  MOB_STATE_CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${MOB_TOK}" "http://127.0.0.1:29900/mobile/api/state")"
+  MOB_STATE="$(curl -fsS -H "Authorization: Bearer ${MOB_TOK}" "http://127.0.0.1:29900/mobile/api/state")"
+  MOB_STATE_CODE=200
+  MOB_LOCK_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${MOB_TOK}" -H "Content-Type: application/json" -d '{"action":"lock_gate","reason":"regtest"}' "http://127.0.0.1:29900/mobile/api/action")"
+  MOB_UNLOCK_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer ${MOB_TOK}" -H "Content-Type: application/json" -d '{"action":"unlock_gate"}' "http://127.0.0.1:29900/mobile/api/action")"
   # Single-device revoke keeps listener up on :29900 so we can observe strict 401 before Shutdown.
   REV_DEV_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H "Content-Type: application/json" -d "{\"id\":\"${DEV_ID}\"}" "http://127.0.0.1:${CTRL_PORT}/api/remote/revoke")"
   AFTER_DEV_REV_CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${MOB_TOK}" "http://127.0.0.1:29900/mobile/api/state")"
   REV_ALL_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H "Content-Type: application/json" -d '{}' "http://127.0.0.1:${CTRL_PORT}/api/remote/revoke")"
-  if [[ "$MOB_STATE_CODE" == "200" && "$REV_DEV_CODE" == "200" && "$AFTER_DEV_REV_CODE" == "401" && "$REV_ALL_CODE" == "200" ]]; then
-    ok "appearance_and_remote_pairing" "appearance hot update (original + legacy) + redacted status + QR SVG + mobile token auth & :29900 revoke verified"
+  if [[ "$MOB_STATE_CODE" == "200" && "$MOB_STATE" == *'"doctor_summary"'* && "$MOB_STATE" == *'"upstream_route"'* && "$MOB_LOCK_CODE" == "200" && "$MOB_UNLOCK_CODE" == "200" && "$REV_DEV_CODE" == "200" && "$AFTER_DEV_REV_CODE" == "401" && "$REV_ALL_CODE" == "200" ]]; then
+    ok "appearance_and_remote_pairing" "appearance hot update + redacted status + QR SVG + mobile extended state/lock/unlock & :29900 revoke verified"
   else
-    fail "appearance_and_remote_pairing" "state=$MOB_STATE_CODE dev_rev=$REV_DEV_CODE after_dev=$AFTER_DEV_REV_CODE all_rev=$REV_ALL_CODE"
+    fail "appearance_and_remote_pairing" "state=$MOB_STATE_CODE lock=$MOB_LOCK_CODE unlock=$MOB_UNLOCK_CODE dev_rev=$REV_DEV_CODE after_dev=$AFTER_DEV_REV_CODE all_rev=$REV_ALL_CODE"
   fi
 else
   fail "appearance_and_remote_pairing" "app=$APP_CODE legacy=$APP_LEGACY_CODE pair=$PAIR_CODE"

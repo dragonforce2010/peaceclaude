@@ -14,3 +14,7 @@ coverage.out
 .env
 .env.*
 config.local.json
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate

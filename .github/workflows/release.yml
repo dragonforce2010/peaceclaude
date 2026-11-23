@@ -1,0 +1,63 @@
+name: Multi-Platform Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: Build macOS Universal DMG & tar.gz
+        run: ./scripts/package-release.sh --allow-dirty
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            dist/PeaceClaude-*.dmg
+            dist/PeaceClaude-*.tar.gz
+            dist/SHA256SUMS.txt
+
+  build-linux-windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg zip
+      - name: Build Linux (tar.gz + .deb) & Windows (.zip)
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          ./scripts/package-all-platforms.sh "$VER"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: multi-artifacts
+          path: dist/multi/*
+
+  publish-release:
+    needs: [build-macos, build-linux-windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+      - name: Regenerate combined SHA256SUMS.txt
+        run: |
+          cd release-files
+          rm -f SHA256SUMS.txt
+          sha256sum PeaceClaude-* > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          generate_release_notes: true
