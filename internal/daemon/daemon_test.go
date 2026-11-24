@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -743,5 +745,58 @@ func TestMobileExtendedStateAndActions(t *testing.T) {
 	}
 	if err := json.Unmarshal(rrMulti.body.Bytes(), &multiRes); err != nil || len(multiRes.Accounts) < 4 {
 		t.Fatalf("expected >=4 concurrent accounts in mobile state, got %d err=%v", len(multiRes.Accounts), err)
+	}
+}
+
+func TestDoctorRepairBrowserShieldsCleansChinesePrefsAndUpgradesArtifacts(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_NO_NOTIFY", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_AUTO_PEACE", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
+
+	srv := New(config.Default(), "/usr/bin/true")
+	prof, err := profile.Ensure(srv.cfg, "default", "Default profile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defDir := filepath.Join(prof.BrowserDir, "Default")
+	extDir := filepath.Join(prof.BrowserDir, "peace-shield-ext")
+	if err := os.MkdirAll(defDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(extDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(defDir, "Preferences"), []byte(`{"intl":{"accept_languages":"zh-CN,zh","selected_languages":"zh-CN,zh"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extDir, "shield.js"), []byte(`/* old shield */`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	reqFix, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/doctor/fix", bytes.NewBufferString(`{"action":"repair_browser_shields"}`))
+	reqFix.Header.Set("Origin", "http://127.0.0.1")
+	rrFix := newResponseRecorder()
+	srv.withCSRF(srv.handleDoctorFix)(rrFix, reqFix)
+	if rrFix.code != http.StatusOK || !strings.Contains(rrFix.body.String(), `"ok":true`) {
+		t.Fatalf("repair_browser_shields failed: code=%d body=%s", rrFix.code, rrFix.body.String())
+	}
+
+	repairedPrefsRaw, err := os.ReadFile(filepath.Join(defDir, "Preferences"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(repairedPrefsRaw), `"en-US,en"`) || strings.Contains(strings.ToLower(string(repairedPrefsRaw)), "zh-cn") {
+		t.Fatalf("expected dirty zh-CN prefs cleaned, got: %s", string(repairedPrefsRaw))
+	}
+	repairedShieldRaw, err := os.ReadFile(filepath.Join(extDir, "shield.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(repairedShieldRaw), "FontFaceSet") || !strings.Contains(string(repairedShieldRaw), "WrappedWorker") {
+		t.Fatalf("expected upgraded shield.js containing FontFaceSet and Worker shield")
+	}
+	if _, err := os.Stat(filepath.Join(extDir, "background.js")); err != nil {
+		t.Fatalf("expected background.js artifact generated: %v", err)
 	}
 }

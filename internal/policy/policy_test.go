@@ -137,3 +137,39 @@ func TestEngineConcurrentUpdateAndEvaluate(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestChallengeBillingDomainsAlwaysProxyEvenWhenProxyAuthDisabled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Shield.ProxyAuthDomains = false
+	cfg.Egress.FailClosed = true
+	eng := NewEngine(cfg)
+
+	// Interactive OAuth domains stay DIRECT when ProxyAuthDomains=false.
+	for _, oauthHost := range []string{"accounts.google.com:443", "oauth2.googleapis.com:443", "appleid.apple.com:443"} {
+		dec := eng.Evaluate(oauthHost, true, "")
+		if dec.Action != ActionDirectLocal {
+			t.Fatalf("expected OAuth %s direct when ProxyAuthDomains=false, got %+v", oauthHost, dec)
+		}
+	}
+
+	// Embedded captcha/billing/session domains MUST exit via static-IP proxy when reaching gateway
+	// so Desktop & login browsers never suffer split-IP blocks on Turnstile/hCaptcha/Stripe/Stytch.
+	for _, embedded := range []string{
+		"challenges.cloudflare.com:443",
+		"turnstile.cloudflare.com:443",
+		"hcaptcha.com:443",
+		"newassets.hcaptcha.com:443",
+		"js.stripe.com:443",
+		"b.stripe.network:443",
+		"stytch.com:443",
+	} {
+		dec := eng.Evaluate(embedded, true, "")
+		if dec.Category != CategoryAuth || dec.Action != ActionProxy {
+			t.Fatalf("expected embedded challenge/billing %s to ActionProxy, got %+v", embedded, dec)
+		}
+		locked := eng.Evaluate(embedded, false, "egress locked")
+		if locked.Action != ActionBlockFailClosed {
+			t.Fatalf("expected embedded %s to fail-closed when gate locked, got %+v", embedded, locked)
+		}
+	}
+}

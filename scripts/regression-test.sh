@@ -446,7 +446,7 @@ fi
 if [[ -d "/Applications/Google Chrome.app" || -d "/Applications/Chromium.app" || -d "/Applications/Brave Browser.app" || -d "/Applications/Microsoft Edge.app" ]]; then
   BROWSER_DRY="$("$BIN" login-browser --dry-run https://fuck-claude.app/)"
   BPROF_DIR="${TMP_HOME}/profiles/default/browser-profile"
-  if [[ "$BROWSER_DRY" == *"--accept-lang=en-US,en"* && "$BROWSER_DRY" == *"--enable-unsafe-extension-debugging"* ]] \
+  if [[ "$BROWSER_DRY" == *"--proxy-pac-url=http://127.0.0.1:${CTRL_PORT}/peaceclaude.pac?mode=login"* && "$BROWSER_DRY" == *"--accept-lang=en-US,en"* && "$BROWSER_DRY" == *"--enable-unsafe-extension-debugging"* ]] \
     && python3 - "$BPROF_DIR" <<'PY'
 import json, os, sys
 bdir = sys.argv[1]
@@ -461,15 +461,20 @@ ext_dir = os.path.join(bdir, "peace-shield-ext")
 manifest = json.load(open(os.path.join(ext_dir, "manifest.json")))
 rules = json.load(open(os.path.join(ext_dir, "rules.json")))
 shield = open(os.path.join(ext_dir, "shield.js")).read()
+for fn in ["manifest.json", "rules.json", "background.js", "shield.js", "icon48.png", "icon128.png"]:
+    assert os.path.isfile(os.path.join(ext_dir, fn)), f"missing {fn}"
 assert manifest["manifest_version"] == 3 and "declarativeNetRequest" in manifest["permissions"]
+assert manifest.get("background", {}).get("service_worker") == "background.js", manifest
+assert "websocket" in rules[0]["condition"]["resourceTypes"] and "stylesheet" in rules[0]["condition"]["resourceTypes"], rules
 assert any(h.get("header") == "Sec-GPC" for h in rules[0]["action"]["requestHeaders"])
-assert "globalPrivacyControl" in shield and "CJK_FONT_RE" in shield and "Intl" in shield
+for sym in ["globalPrivacyControl", "CJK_FONT_RE", "FontFaceSet", "CSSStyleDeclaration", "localeCompare", "WrappedWorker"]:
+    assert sym in shield, f"shield.js missing {sym}"
 PY
   then
     if command -v node >/dev/null 2>&1; then
       node --check "${BPROF_DIR}/peace-shield-ext/shield.js"
     fi
-    ok "isolated_browser_shield_artifacts" "Chrome Preferences, Local State, and valid MV3 Identity Shield artifacts generated"
+    ok "isolated_browser_shield_artifacts" "Chrome Preferences, Local State, mode=login PAC, and full MV3 Identity Shield artifacts verified"
   else
     fail "isolated_browser_shield_artifacts" "missing hardened flags or extension artifacts in $BROWSER_DRY"
   fi
@@ -721,6 +726,71 @@ then
   ok "desktop_domain_policy_and_pac_mode" "domain policy API persistence, desktop PAC routing (unknown intranet=DIRECT), and proxy-mode bypass guard verified"
 else
   fail "desktop_domain_policy_and_pac_mode" "desktop domain policy or PAC mode verification failed"
+fi
+
+# 16i. Verify mode=login PAC (Turnstile/hCaptcha/Stripe/Stytch proxied, Google OAuth DIRECT) & doctor browser-shield repair loop
+LOGIN_PAC_JS="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/peaceclaude.pac?mode=login")"
+LOGIN_PAC_EVAL="$(node - "$LOGIN_PAC_JS" "$HTTP_PORT" <<'NODE'
+const vm = require('vm');
+const pacCode = process.argv[2];
+const httpPort = process.argv[3];
+const sandbox = {
+  dnsDomainIs(host, domain) {
+    return host === domain || (host.length > domain.length && host.slice(-domain.length) === domain);
+  },
+  isPlainHostName(host) { return host.indexOf('.') === -1; },
+  ipToNum(ip) {
+    const p = ip.split('.');
+    if (p.length !== 4) return 0;
+    return (((+p[0]) << 24) | ((+p[1]) << 16) | ((+p[2]) << 8) | (+p[3])) >>> 0;
+  },
+  isInNet(host, pattern, mask) {
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(host)) return false;
+    return (sandbox.ipToNum(host) & sandbox.ipToNum(mask)) === (sandbox.ipToNum(pattern) & sandbox.ipToNum(mask));
+  },
+};
+vm.runInNewContext(pacCode, sandbox);
+const mustProxy = ['claude.ai', 'challenges.cloudflare.com', 'turnstile.cloudflare.com', 'newassets.hcaptcha.com', 'js.stripe.com', 'stytch.com', 'o1158394.ingest.us.sentry.io'];
+const mustDirect = ['accounts.google.com', 'www.google.com', 'cdn.unknown-corp.net'];
+const errs = [];
+for (const h of mustProxy) {
+  const res = sandbox.FindProxyForURL('https://' + h + '/', h);
+  if (!res.includes('127.0.0.1:' + httpPort)) errs.push(`expected PROXY for ${h}, got ${res}`);
+}
+for (const h of mustDirect) {
+  const res = sandbox.FindProxyForURL('https://' + h + '/', h);
+  if (res !== 'DIRECT') errs.push(`expected DIRECT for ${h}, got ${res}`);
+}
+console.log(errs.length === 0 ? 'OK' : errs.join('; '));
+NODE
+)"
+
+DIRTY_PREF_PATH="${TMP_HOME}/profiles/default/browser-profile/Default/Preferences"
+mkdir -p "$(dirname "$DIRTY_PREF_PATH")"
+printf '{"intl":{"accept_languages":"zh-CN,zh","selected_languages":"zh-CN,zh"},"enable_do_not_track":false}\n' > "$DIRTY_PREF_PATH"
+DOC_WARN_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/doctor")"
+FIX_SHIELD_JSON="$(curl -fsS -X POST "http://127.0.0.1:${CTRL_PORT}/api/doctor/fix" -H 'Content-Type: application/json' -d '{"action":"repair_browser_shields"}')"
+DOC_AFTER_FIX_JSON="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/api/doctor")"
+if [[ "$LOGIN_PAC_EVAL" == "OK" ]] && python3 - "$DOC_WARN_JSON" "$FIX_SHIELD_JSON" "$DOC_AFTER_FIX_JSON" "$DIRTY_PREF_PATH" <<'PY'
+import json, sys
+w_doc = json.loads(sys.argv[1])
+fix_res = json.loads(sys.argv[2])
+a_doc = json.loads(sys.argv[3])
+prefs = open(sys.argv[4]).read()
+w_item = next(c for c in w_doc["checks"] if c["id"] == "browser_desktop_tz_lang")
+assert w_item["status"] == "warn", w_item
+if w_item.get("fix_action") != "takeover_desktop":
+    assert w_item.get("fix_action") == "repair_browser_shields", w_item
+assert fix_res.get("ok") is True, fix_res
+assert '"zh-CN' not in prefs and '"en-US,en"' in prefs, prefs
+a_item = next(c for c in a_doc["checks"] if c["id"] == "browser_desktop_tz_lang")
+if a_item.get("fix_action") != "takeover_desktop":
+    assert a_item["status"] == "pass" and not a_item.get("fix_hint"), a_item
+PY
+then
+  ok "login_pac_and_doctor_shield_repair" "mode=login PAC (Turnstile/hCaptcha/Stripe/Stytch proxied, Google OAuth DIRECT) & doctor shield repair verified"
+else
+  fail "login_pac_and_doctor_shield_repair" "login PAC ($LOGIN_PAC_EVAL) or doctor shield repair check failed"
 fi
 
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes

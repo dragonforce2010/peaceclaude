@@ -619,3 +619,74 @@ func TestBuildProxyBypassListCorporateDirectAndAnthropicGuard(t *testing.T) {
 		t.Fatalf("BuildProxyBypassList (extra protected) = %q, want %q", got, wantGuarded)
 	}
 }
+
+func TestBuildLoginBrowserProxyArgsUsesLoginPACAndProxyMode(t *testing.T) {
+	cfg := config.Default()
+	pacArgs := BuildLoginBrowserProxyArgs(cfg)
+	joined := strings.Join(pacArgs, " ")
+	if !strings.Contains(joined, "--proxy-pac-url="+cfg.LoginBrowserPACURL()) || !strings.Contains(joined, "mode=login") {
+		t.Fatalf("expected BuildLoginBrowserProxyArgs to emit mode=login PAC, got %v", pacArgs)
+	}
+
+	cfg.Shield.DesktopProxyMode = "proxy"
+	proxyArgs := BuildLoginBrowserProxyArgs(cfg)
+	joinedProxy := strings.Join(proxyArgs, " ")
+	if !strings.Contains(joinedProxy, "--proxy-server="+cfg.HTTPProxyURL()) || !strings.Contains(joinedProxy, "--proxy-bypass-list=") {
+		t.Fatalf("expected proxy mode flags, got %v", proxyArgs)
+	}
+}
+
+func TestInspectIsolatedBrowserProfileDetectsChinesePrefsAndDisabledShield(t *testing.T) {
+	tmp := t.TempDir()
+	bdir := filepath.Join(tmp, "browser-profile")
+
+	// 1. Clean preferences + generated extension -> ready & clean
+	if err := ensureBrowserPrivacyPrefs(bdir, "en-US"); err != nil {
+		t.Fatal(err)
+	}
+	extDir, err := ensureBrowserShieldExtension(bdir, "en-US")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fn := range []string{"manifest.json", "rules.json", "background.js", "shield.js", "icon48.png", "icon128.png"} {
+		if _, err := os.Stat(filepath.Join(extDir, fn)); err != nil {
+			t.Fatalf("missing extension artifact %s: %v", fn, err)
+		}
+	}
+	cleanHealth := InspectIsolatedBrowserProfile(bdir)
+	if !cleanHealth.Initialized || !cleanHealth.ExtArtifactsReady || !cleanHealth.PrefsClean || len(cleanHealth.Issues) != 0 {
+		t.Fatalf("expected clean profile health, got %+v", cleanHealth)
+	}
+
+	// 2. Dirty zh-CN preferences + Secure Preferences without shield -> flagged
+	defDir := filepath.Join(bdir, "Default")
+	if err := os.WriteFile(filepath.Join(defDir, "Preferences"), []byte(`{"intl":{"accept_languages":"zh-CN,zh","selected_languages":"zh-CN,zh"},"enable_do_not_track":false}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(defDir, "Secure Preferences"), []byte(`{"extensions":{"settings":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dirtyHealth := InspectIsolatedBrowserProfile(bdir)
+	if dirtyHealth.PrefsClean || !dirtyHealth.HasSecurePrefs || dirtyHealth.ExtEnabled || len(dirtyHealth.Issues) < 2 {
+		t.Fatalf("expected dirty prefs & missing shield flagged, got %+v", dirtyHealth)
+	}
+
+	// 3. Disabled shield entry in Secure Preferences -> ExtLoaded=true, ExtEnabled=false
+	_ = ensureBrowserPrivacyPrefs(bdir, "en-US")
+	secDisabled, _ := json.Marshal(map[string]any{
+		"extensions": map[string]any{
+			"settings": map[string]any{
+				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": map[string]any{
+					"path":            extDir,
+					"disable_reasons": []int{8192},
+					"manifest":        map[string]any{"name": isolatedShieldExtName},
+				},
+			},
+		},
+	})
+	_ = os.WriteFile(filepath.Join(defDir, "Secure Preferences"), secDisabled, 0o600)
+	disHealth := InspectIsolatedBrowserProfile(bdir)
+	if !disHealth.ExtLoaded || disHealth.ExtEnabled || len(disHealth.Issues) == 0 {
+		t.Fatalf("expected disabled shield flagged, got %+v", disHealth)
+	}
+}

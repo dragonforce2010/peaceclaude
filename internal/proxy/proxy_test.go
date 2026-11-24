@@ -249,6 +249,47 @@ func TestRenderPACCoversGoogleOAuthAndKeepsWWWGoogleDirect(t *testing.T) {
 	}
 }
 
+func TestRenderPACLoginAndDesktopIncludeChallengeBillingWhileDefaultKeepsDirect(t *testing.T) {
+	cfg := config.Default()
+	cfg.Shield.ProxyAuthDomains = false
+	cfg.Shield.TelemetryShield = true
+
+	// 1. Host system default PAC ("claude") keeps general browsers direct for third-party challenge/auth domains.
+	pacClaude := RenderPAC(cfg, "claude")
+	for _, keepDirect := range []string{"challenges.cloudflare.com", "hcaptcha.com", "stripe.com", "accounts.google.com"} {
+		if strings.Contains(pacClaude, keepDirect) {
+			t.Fatalf("default host PAC must keep %s DIRECT:\n%s", keepDirect, pacClaude)
+		}
+	}
+
+	// 2. Both "desktop" and "login" modes must include embedded challenge/billing domains while leaving Google OAuth DIRECT.
+	for _, mode := range []string{"desktop", "login"} {
+		pac := RenderPAC(cfg, mode)
+		if !strings.Contains(pac, "mode="+mode) {
+			t.Fatalf("expected mode=%s header comment in PAC:\n%s", mode, pac)
+		}
+		for _, want := range []string{
+			"claude.ai",
+			"anthropic.com",
+			"challenges.cloudflare.com",
+			"turnstile.cloudflare.com",
+			"hcaptcha.com",
+			"stripe.com",
+			"js.stripe.com",
+			"stripe.network",
+			"stytch.com",
+			"sentry.io",
+		} {
+			if !strings.Contains(pac, want) {
+				t.Fatalf("mode=%s PAC missing %q:\n%s", mode, want, pac)
+			}
+		}
+		if strings.Contains(pac, "accounts.google.com") {
+			t.Fatalf("mode=%s PAC must keep Google OAuth DIRECT when ProxyAuthDomains=false:\n%s", mode, pac)
+		}
+	}
+}
+
 func TestGatewayConnectRetriesTransientUpstreamFailureAndBackupFailover(t *testing.T) {
 	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
 

@@ -284,29 +284,40 @@ func cdpFetchJSON(ctx context.Context, rawURL string, dst any) error {
 }
 
 // cdpLoadUnpackedExtension polls the loopback CDP /json/version endpoint and loads extDir
-// via Extensions.loadUnpacked, returning the installed extension ID.
+// via Extensions.loadUnpacked, retrying transient initialization errors before ctx expires.
 func cdpLoadUnpackedExtension(ctx context.Context, port int, extDir string) (string, error) {
 	if port <= 0 || strings.TrimSpace(extDir) == "" {
 		return "", errors.New("invalid CDP extension parameters")
 	}
 	verURL := fmt.Sprintf("http://127.0.0.1:%d/json/version", port)
 	var lastErr error
+	attempts := 0
 	for {
 		var ver struct {
 			WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 		}
 		if err := cdpFetchJSON(ctx, verURL, &ver); err == nil && ver.WebSocketDebuggerURL != "" {
+			attempts++
 			resRaw, cerr := cdpCall(ctx, ver.WebSocketDebuggerURL, "Extensions.loadUnpacked", map[string]any{
 				"path": extDir,
 			})
-			if cerr != nil {
+			if cerr == nil {
+				var out struct {
+					ID string `json:"id"`
+				}
+				_ = json.Unmarshal(resRaw, &out)
+				return out.ID, nil
+			}
+			lastErr = cerr
+			if attempts >= 3 || ctx.Err() != nil {
 				return "", cerr
 			}
-			var out struct {
-				ID string `json:"id"`
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(300 * time.Millisecond):
 			}
-			_ = json.Unmarshal(resRaw, &out)
-			return out.ID, nil
+			continue
 		} else if err != nil {
 			lastErr = err
 		}
@@ -319,6 +330,27 @@ func cdpLoadUnpackedExtension(ctx context.Context, port int, extDir string) (str
 		case <-time.After(80 * time.Millisecond):
 		}
 	}
+}
+
+// cdpOpenNewTab opens targetURL as a new tab in a running CDP-enabled browser without attaching Runtime hooks.
+func cdpOpenNewTab(ctx context.Context, port int, targetURL string) error {
+	if port <= 0 || strings.TrimSpace(targetURL) == "" {
+		return errors.New("invalid CDP createTarget parameters")
+	}
+	verURL := fmt.Sprintf("http://127.0.0.1:%d/json/version", port)
+	var ver struct {
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := cdpFetchJSON(ctx, verURL, &ver); err != nil {
+		return err
+	}
+	if ver.WebSocketDebuggerURL == "" {
+		return errors.New("CDP version response missing webSocketDebuggerUrl")
+	}
+	_, err := cdpCall(ctx, ver.WebSocketDebuggerURL, "Target.createTarget", map[string]any{
+		"url": targetURL,
+	})
+	return err
 }
 
 // cdpNavigateFirstPage finds the first page target on loopback port and executes Page.navigate

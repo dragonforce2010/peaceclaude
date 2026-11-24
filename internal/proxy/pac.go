@@ -76,16 +76,24 @@ function FindProxyForURL(url, host) {
 		addDomain(d)
 	}
 	isDesktop := strings.EqualFold(strings.TrimSpace(mode), "desktop")
-	if isDesktop && cfg != nil && cfg.Shield.TelemetryShield {
-		for _, d := range policy.TelemetryDomains() {
+	isLogin := strings.EqualFold(strings.TrimSpace(mode), "login")
+	if isDesktop || isLogin {
+		// Isolated Claude Desktop and login browser sessions must exit through the same
+		// static residential IP for embedded captcha/payment/session flows to prevent split-IP blocks.
+		for _, d := range policy.ChallengeBillingDomains() {
 			addDomain(d)
+		}
+		if cfg != nil && cfg.Shield.TelemetryShield {
+			for _, d := range policy.TelemetryDomains() {
+				addDomain(d)
+			}
 		}
 	}
 	if cfg != nil {
 		for _, extra := range cfg.Shield.ExtraClaudeDomains {
 			addDomain(extra)
 		}
-		if isDesktop {
+		if isDesktop || isLogin {
 			for _, extra := range cfg.Shield.ExtraBlockedDomains {
 				addDomain(extra)
 			}
@@ -108,7 +116,9 @@ function FindProxyForURL(url, host) {
 	}
 
 	modeLabel := "claude"
-	if isDesktop {
+	if isLogin {
+		modeLabel = "login"
+	} else if isDesktop {
 		modeLabel = "desktop"
 	}
 

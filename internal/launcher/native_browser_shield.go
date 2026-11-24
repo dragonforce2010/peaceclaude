@@ -299,7 +299,7 @@ func EnsureNativeBrowserShield(cfg *config.Config, gate egress.GateSnapshot) (st
 		},
 		"condition": map[string]any{
 			"requestDomains": domains,
-			"resourceTypes":  []string{"main_frame", "sub_frame", "xmlhttprequest", "script", "other"},
+			"resourceTypes":  sharedDNRResourceTypes,
 		},
 	}}
 	rRaw, err := json.MarshalIndent(rules, "", "  ")
@@ -385,235 +385,30 @@ func buildNativeShieldContentScript() string {
     Array.isArray(cfg.langs) && cfg.langs.length > 0 ? cfg.langs.slice() : [TARGET_LOCALE, 'en']
   );
 
-  const RawDate = Date;
-  const RawDTF = Intl.DateTimeFormat;
+__NATIVE_FN_MASK__
 
-  const nativeFnMap = new WeakMap();
-  const origFnToString = Function.prototype.toString;
-  const patchedToString = function toString() {
-    if (nativeFnMap.has(this)) return nativeFnMap.get(this);
-    return origFnToString.call(this);
-  };
-  nativeFnMap.set(patchedToString, 'function toString() { [native code] }');
-  try {
-    Object.defineProperty(Function.prototype, 'toString', {
-      value: patchedToString,
-      writable: true,
-      configurable: true,
-    });
-  } catch {}
-  const maskNative = (fn, name) => {
-    nativeFnMap.set(fn, 'function ' + name + '() { [native code] }');
-    return fn;
-  };
+__TIMEZONE_CORE__
 
-  // Accurate IANA timezone offset calculation (positive west of UTC, e.g. Denver = +420 / +360 DST)
-  let dtfParts = null;
-  let dtfLongName = null;
-  let dtfDisplay = null;
-  try {
-    dtfParts = new RawDTF('en-US', {
-      timeZone: TARGET_TZ,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    });
-    dtfLongName = new RawDTF('en-US', {
-      timeZone: TARGET_TZ,
-      timeZoneName: 'long',
-    });
-    dtfDisplay = new RawDTF('en-US', {
-      timeZone: TARGET_TZ,
-      weekday: 'short',
-      month: 'short',
-      day: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hourCycle: 'h23',
-    });
-  } catch {}
+__NAVIGATOR_SHIELD__
 
-  const partsMap = (fmt, dateObj) => {
-    const out = {};
-    const parts = fmt.formatToParts(dateObj);
-    for (let i = 0; i < parts.length; i++) {
-      out[parts[i].type] = parts[i].value;
-    }
-    return out;
-  };
+__INTL_DATE_SHIELD__
 
-  const getOffsetMinutesForTZ = (dateObj) => {
-    const ts = dateObj instanceof RawDate ? RawDate.prototype.getTime.call(dateObj) : NaN;
-    if (!Number.isFinite(ts) || !dtfParts) return 0;
-    const m = partsMap(dtfParts, dateObj);
-    const wallMs = RawDate.UTC(
-      Number(m.year),
-      Number(m.month) - 1,
-      Number(m.day),
-      Number(m.hour) % 24,
-      Number(m.minute),
-      Number(m.second)
-    );
-    const utcTruncMs = Math.floor(ts / 1000) * 1000;
-    return Math.round((utcTruncMs - wallMs) / 60000);
-  };
+__LOCALE_EXT_SHIELD__
 
-  const formatGMTOffset = (offsetMin) => {
-    const sign = offsetMin > 0 ? '-' : '+';
-    const abs = Math.abs(offsetMin);
-    const hh = String(Math.floor(abs / 60)).padStart(2, '0');
-    const mm = String(abs % 60).padStart(2, '0');
-    return 'GMT' + sign + hh + mm;
-  };
+__CJK_FONT_SHIELD__
 
-  // 1. Align Date prototype timezone methods without replacing Date constructor
-  try {
-    const origGetTZOffset = RawDate.prototype.getTimezoneOffset;
-    const origToString = RawDate.prototype.toString;
-    const origToDateString = RawDate.prototype.toDateString;
-    const origToTimeString = RawDate.prototype.toTimeString;
-
-    Object.defineProperty(RawDate.prototype, 'getTimezoneOffset', {
-      value: maskNative(function getTimezoneOffset() {
-        const ts = RawDate.prototype.getTime.call(this);
-        if (!Number.isFinite(ts)) return origGetTZOffset.call(this);
-        return getOffsetMinutesForTZ(this);
-      }, 'getTimezoneOffset'),
-      writable: true,
-      configurable: true,
-    });
-
-    const formatTimeZonePart = (dateObj) => {
-      const off = getOffsetMinutesForTZ(dateObj);
-      let tzLong = TARGET_TZ;
-      if (dtfLongName) {
-        const lm = partsMap(dtfLongName, dateObj);
-        if (lm.timeZoneName) tzLong = lm.timeZoneName;
-      }
-      return formatGMTOffset(off) + ' (' + tzLong + ')';
-    };
-
-    Object.defineProperty(RawDate.prototype, 'toDateString', {
-      value: maskNative(function toDateString() {
-        const ts = RawDate.prototype.getTime.call(this);
-        if (!Number.isFinite(ts) || !dtfDisplay) return origToDateString.call(this);
-        const m = partsMap(dtfDisplay, this);
-        return m.weekday + ' ' + m.month + ' ' + m.day + ' ' + m.year;
-      }, 'toDateString'),
-      writable: true,
-      configurable: true,
-    });
-
-    Object.defineProperty(RawDate.prototype, 'toTimeString', {
-      value: maskNative(function toTimeString() {
-        const ts = RawDate.prototype.getTime.call(this);
-        if (!Number.isFinite(ts) || !dtfDisplay) return origToTimeString.call(this);
-        const m = partsMap(dtfDisplay, this);
-        const hr = String(Number(m.hour) % 24).padStart(2, '0');
-        return hr + ':' + m.minute + ':' + m.second + ' ' + formatTimeZonePart(this);
-      }, 'toTimeString'),
-      writable: true,
-      configurable: true,
-    });
-
-    Object.defineProperty(RawDate.prototype, 'toString', {
-      value: maskNative(function toString() {
-        const ts = RawDate.prototype.getTime.call(this);
-        if (!Number.isFinite(ts) || !dtfDisplay) return origToString.call(this);
-        const m = partsMap(dtfDisplay, this);
-        const hr = String(Number(m.hour) % 24).padStart(2, '0');
-        return m.weekday + ' ' + m.month + ' ' + m.day + ' ' + m.year + ' ' + hr + ':' + m.minute + ':' + m.second + ' ' + formatTimeZonePart(this);
-      }, 'toString'),
-      writable: true,
-      configurable: true,
-    });
-  } catch {}
-
-  // 2. Browser Language & Privacy Signals (Navigator.prototype; network info left native)
-  try {
-    Object.defineProperty(Navigator.prototype, 'language', {
-      get: maskNative(function language() { return TARGET_LOCALE; }, 'get language'),
-      configurable: true,
-    });
-    Object.defineProperty(Navigator.prototype, 'languages', {
-      get: maskNative(function languages() { return TARGET_LANGS; }, 'get languages'),
-      configurable: true,
-    });
-    Object.defineProperty(Navigator.prototype, 'globalPrivacyControl', {
-      get: maskNative(function globalPrivacyControl() { return true; }, 'get globalPrivacyControl'),
-      configurable: true,
-    });
-    Object.defineProperty(Navigator.prototype, 'doNotTrack', {
-      get: maskNative(function doNotTrack() { return '1'; }, 'get doNotTrack'),
-      configurable: true,
-    });
-  } catch {}
-
-  // 3. Align Intl default locale & DateTimeFormat default timeZone + Date.prototype.toLocale*
-  try {
-    const shouldReplaceLocaleArg = (arg) => arg === undefined || (Array.isArray(arg) && arg.length === 0);
-    const withDefaultTimeZone = (args) => {
-      const loc = args.length === 0 || shouldReplaceLocaleArg(args[0]) ? TARGET_LOCALE : args[0];
-      const opts = args.length > 1 ? args[1] : undefined;
-      if (opts === undefined || opts === null) {
-        return [loc, { timeZone: TARGET_TZ }, ...args.slice(2)];
-      }
-      if (typeof opts === 'object' && opts.timeZone === undefined) {
-        return [loc, Object.assign({}, opts, { timeZone: TARGET_TZ }), ...args.slice(2)];
-      }
-      return [loc, ...args.slice(1)];
-    };
-
-    const intlCtors = [
-      'DateTimeFormat',
-      'NumberFormat',
-      'Collator',
-      'PluralRules',
-      'RelativeTimeFormat',
-      'ListFormat',
-      'DisplayNames',
-      'Segmenter',
-    ];
-    for (const ctorName of intlCtors) {
-      const Orig = Intl[ctorName];
-      if (!Orig) continue;
-      const isDTF = ctorName === 'DateTimeFormat';
-      const prepareArgs = (args) => {
-        if (isDTF) return withDefaultTimeZone(args);
-        return args.length === 0 || shouldReplaceLocaleArg(args[0]) ? [TARGET_LOCALE, ...args.slice(1)] : args;
-      };
-      const Wrapped = new Proxy(Orig, {
-        construct(target, args, newTarget) {
-          return Reflect.construct(target, prepareArgs(args), newTarget);
-        },
-        apply(target, thisArg, args) {
-          return Reflect.apply(target, thisArg, prepareArgs(args));
-        },
-      });
-      maskNative(Wrapped, ctorName);
-      Object.defineProperty(Intl, ctorName, { value: Wrapped, writable: true, configurable: true });
-    }
-
-    for (const mName of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) {
-      const origDateFn = RawDate.prototype[mName];
-      if (typeof origDateFn !== 'function') continue;
-      const wrappedDateFn = maskNative(function(...args) {
-        return origDateFn.apply(this, withDefaultTimeZone(args));
-      }, mName);
-      Object.defineProperty(RawDate.prototype, mName, { value: wrappedDateFn, writable: true, configurable: true });
-    }
-  } catch {}
-
-__CANVAS_CJK_SHIELD__
+__WORKER_SHIELD__
 })();
 `
-	return strings.ReplaceAll(tmpl, "__CANVAS_CJK_SHIELD__", canvasCJKFontShieldSnippet)
+	return strings.NewReplacer(
+		"__NATIVE_FN_MASK__", nativeFnMaskSnippet,
+		"__TIMEZONE_CORE__", timezoneCoreJSSnippet,
+		"__NAVIGATOR_SHIELD__", navigatorIdentityShieldSnippet,
+		"__INTL_DATE_SHIELD__", buildIntlAndDateShieldSnippet(true),
+		"__LOCALE_EXT_SHIELD__", localeExtensionsShieldSnippet,
+		"__CJK_FONT_SHIELD__", cjkFontShieldSnippet,
+		"__WORKER_SHIELD__", buildWorkerShieldSnippet(true),
+	).Replace(tmpl)
 }
 
 func buildNativeShieldBackgroundJS(ctrlURLJSON, tzJSON, locJSON string) string {

@@ -1487,11 +1487,23 @@
     loadAccounts(false);
   }));
 
+  function notifyBrowserLaunch(r, baseMsg) {
+    if (r && r.shield_warning) {
+      toast(`${baseMsg} — 警告: ${r.shield_warning}`, 'warn');
+      return;
+    }
+    if (r && r.shield_healed) {
+      toast(`${baseMsg}（已自动热恢复指纹护盾）`, 'ok');
+      return;
+    }
+    toast(baseMsg, 'ok');
+  }
+
   $('btn-launch-browser').addEventListener('click', () => withBtnBusy($('btn-launch-browser'), '打开中…', async () => {
     const r = await api('/api/launch/browser', { method: 'POST', body: '{}' });
     const bName = (r.browser || '').split('/').pop() || 'Browser';
     const pidHint = r.pid ? ` · PID ${r.pid}` : '';
-    toast(`已为档案 ${r.profile || 'default'} 打开独立隔离浏览器（${bName}${pidHint}），Cookie 与时区完全隔离`, 'ok');
+    notifyBrowserLaunch(r, `已为档案 ${r.profile || 'default'} 打开独立隔离浏览器（${bName}${pidHint}），Cookie 与时区完全隔离`);
   }));
 
   // Inline PAC Quick Enable Banner on Accounts Tab
@@ -1596,7 +1608,7 @@
       } else if (browBtn) {
         const r = await api('/api/launch/browser', { method: 'POST', body: JSON.stringify({ profile: browBtn.dataset.accBrowser, url: 'https://claude.ai/login' }) });
         const bName = (r.browser || '').split('/').pop() || 'Browser';
-        toast(`已打开 ${browBtn.dataset.accBrowser} 隔离浏览器（${bName}${r.pid ? ' · PID ' + r.pid : ''}）`, 'ok');
+        notifyBrowserLaunch(r, `已打开 ${browBtn.dataset.accBrowser} 隔离浏览器（${bName}${r.pid ? ' · PID ' + r.pid : ''}）`);
       } else if (detBtn) {
         await openAccountDetail(detBtn.dataset.accDetail, false);
       } else if (cliBtn) {
@@ -1690,7 +1702,7 @@
     return withBtnBusy($('det-btn-browser'), '打开中…', async () => {
       const r = await api('/api/launch/browser', { method: 'POST', body: JSON.stringify({ profile: currentDetailName, url: 'https://claude.ai/login' }) });
       const bName = (r.browser || '').split('/').pop() || 'Browser';
-      toast(`已打开 ${currentDetailName} 隔离浏览器（${bName}${r.pid ? ' · PID ' + r.pid : ''}）`, 'ok');
+      notifyBrowserLaunch(r, `已打开 ${currentDetailName} 隔离浏览器（${bName}${r.pid ? ' · PID ' + r.pid : ''}）`);
     });
   });
   $('det-btn-copy-cli').addEventListener('click', async () => {
@@ -1859,7 +1871,7 @@
   $('btn-launch-browser-fc')?.addEventListener('click', () => withBtnBusy($('btn-launch-browser-fc'), '启动中…', async () => {
     const r = await api('/api/launch/browser', { method: 'POST', body: JSON.stringify({ url: 'https://fuck-claude.app/' }) });
     const bName = (r.browser || '').split('/').pop() || 'Browser';
-    toast(`已用 ${r.profile || 'default'} 隔离浏览器打开 fuck-claude.app（${bName}${r.pid ? ' · PID ' + r.pid : ''}），请点击 START SCAN 实测`, 'ok');
+    notifyBrowserLaunch(r, `已用 ${r.profile || 'default'} 隔离浏览器打开 fuck-claude.app（${bName}${r.pid ? ' · PID ' + r.pid : ''}），请点击 START SCAN 实测`);
   }));
   $('btn-run-diagnose').addEventListener('click', () => withBtnBusy($('btn-run-diagnose'), '探测中…', async () => {
     const el = $('diagnose-result');

@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -338,16 +340,28 @@ func RunDoctor(ctx context.Context, cfg *config.Config, daemonRunning bool, gate
 			"保持 identity.sync_timezone=true 且 language=en-US", 8, true)
 	}
 
-	// 5. 浏览器与 Desktop 时区与语言 (Desktop/Browser launch flags + running process audit)
+	// 5. 浏览器与 Desktop 时区与语言 (Desktop/Browser launch flags + running process & isolated browser shield audit)
+	browserIssues, checkedBrowsers := auditIsolatedBrowserShields(cfg)
 	if desktopAudit.ExposedCount > 0 {
-		add("browser_desktop_tz_lang", "5. 浏览器与 Desktop 时区与语言", "warn",
-			fmt.Sprintf("隔离启动参数已就绪 (--lang=%s, TZ=%s)，但检测到 %d 个未隔离的原生 Claude.app 仍在运行",
-				cfg.Identity.Language, gateSnap.EffectiveTimezone, desktopAudit.ExposedCount),
+		detail := fmt.Sprintf("隔离启动参数已就绪 (--lang=%s, TZ=%s)，但检测到 %d 个未隔离的原生 Claude.app 仍在运行",
+			cfg.Identity.Language, gateSnap.EffectiveTimezone, desktopAudit.ExposedCount)
+		if len(browserIssues) > 0 {
+			detail += fmt.Sprintf("；另有隔离浏览器护盾异常：%s", strings.Join(browserIssues, "；"))
+		}
+		add("browser_desktop_tz_lang", "5. 浏览器与 Desktop 时区与语言", "warn", detail,
 			"关闭原生 Claude.app 窗口，改用 `/Applications/PeaceClaude.app` 或 `peaceclaude app`", 8, true)
+	} else if len(browserIssues) > 0 {
+		add("browser_desktop_tz_lang", "5. 浏览器与 Desktop 时区与语言", "warn",
+			fmt.Sprintf("已审计 %d 个隔离浏览器档案，发现护盾/语言异常：%s", checkedBrowsers, strings.Join(browserIssues, "；")),
+			"点击一键修复清理中文偏好并为运行中隔离浏览器热补载指纹护盾", 8, true)
 	} else {
+		browserNote := "隔离浏览器尚无已初始化档案"
+		if checkedBrowsers > 0 {
+			browserNote = fmt.Sprintf("已核验 %d 个隔离浏览器档案护盾在线且无中文偏好残留", checkedBrowsers)
+		}
 		add("browser_desktop_tz_lang", "5. 浏览器与 Desktop 时区与语言", "pass",
-			fmt.Sprintf("Desktop & 隔离登录浏览器均强制注入 --lang=%s · --accept-lang · TZ=%s，且启用 Identity Shield（Intl/DNT/GPC/Geolocation 禁权与 Canvas 中文字体防护）",
-				cfg.Identity.Language, gateSnap.EffectiveTimezone),
+			fmt.Sprintf("Desktop & 隔离登录浏览器均强制注入 --lang=%s · --accept-lang · TZ=%s，且启用 Identity Shield（Intl/toLocale/Worker/DOM&Canvas字体/Geolocation 禁权与 GPC 防护 · %s）",
+				cfg.Identity.Language, gateSnap.EffectiveTimezone, browserNote),
 			"", 8, true)
 	}
 
@@ -646,7 +660,10 @@ func fixMetadataForCheck(id, status, detail string) (fixable bool, label, action
 	case "terminal_channel", "egress_rules_match":
 		return true, "重检出口并解除门禁", "recheck_egress"
 	case "browser_desktop_tz_lang":
-		return true, "一键接管隔离 Desktop", "takeover_desktop"
+		if strings.Contains(detail, "原生 Claude.app") {
+			return true, "一键接管隔离 Desktop", "takeover_desktop"
+		}
+		return true, "一键修复隔离浏览器护盾", "repair_browser_shields"
 	case "dns_constraint", "system_tz_lang", "shared_files_isolation", "host_mgmt_api", "proxy_fail_closed", "udp_constraint", "telemetry":
 		return true, "一键启用安全防护配置", "enable_hardening"
 	case "binaries":
@@ -654,4 +671,228 @@ func fixMetadataForCheck(id, status, detail string) (fixable bool, label, action
 	default:
 		return false, "", ""
 	}
+}
+
+type runningBrowserProc struct {
+	pid          int
+	hasUnsafeExt bool
+	debugPort    int
+}
+
+func scanRunningIsolatedBrowsers() map[string]runningBrowserProc {
+	outMap := map[string]runningBrowserProc{}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	raw, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,command=").Output()
+	if err != nil {
+		return outMap
+	}
+	for _, ln := range strings.Split(string(raw), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" || !strings.Contains(ln, "--user-data-dir=") || strings.Contains(ln, "--type=") {
+			continue
+		}
+		idx := strings.IndexAny(ln, " \t")
+		if idx <= 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(ln[:idx]))
+		if err != nil || pid <= 1 {
+			continue
+		}
+		cmdLine := strings.TrimSpace(ln[idx+1:])
+		udIdx := strings.Index(cmdLine, "--user-data-dir=")
+		if udIdx < 0 {
+			continue
+		}
+		rest := cmdLine[udIdx+len("--user-data-dir="):]
+		userDataDir := ""
+		if strings.HasPrefix(rest, `"`) {
+			if end := strings.Index(rest[1:], `"`); end >= 0 {
+				userDataDir = rest[1 : 1+end]
+			}
+		} else if strings.HasPrefix(rest, `'`) {
+			if end := strings.Index(rest[1:], `'`); end >= 0 {
+				userDataDir = rest[1 : 1+end]
+			}
+		} else {
+			if sp := strings.IndexAny(rest, " \t"); sp >= 0 {
+				userDataDir = rest[:sp]
+			} else {
+				userDataDir = rest
+			}
+		}
+		userDataDir = filepath.Clean(strings.TrimSpace(userDataDir))
+		if userDataDir == "" || userDataDir == "." {
+			continue
+		}
+		dbgPort := 0
+		for _, field := range strings.Fields(cmdLine) {
+			clean := strings.Trim(field, `"'`)
+			if strings.HasPrefix(strings.ToLower(clean), "--remote-debugging-port=") {
+				_, pStr, _ := strings.Cut(clean, "=")
+				if p, perr := strconv.Atoi(strings.TrimSpace(pStr)); perr == nil && p > 0 && p <= 65535 {
+					dbgPort = p
+				}
+			}
+		}
+		outMap[userDataDir] = runningBrowserProc{
+			pid:          pid,
+			hasUnsafeExt: strings.Contains(cmdLine, "--enable-unsafe-extension-debugging"),
+			debugPort:    dbgPort,
+		}
+	}
+	return outMap
+}
+
+func isBrowserShieldEntryEnabled(entry map[string]any) bool {
+	if entry == nil {
+		return false
+	}
+	if stateNum, hasState := entry["state"].(float64); hasState && int(stateNum) == 0 {
+		return false
+	}
+	switch reasons := entry["disable_reasons"].(type) {
+	case []any:
+		if len(reasons) > 0 {
+			return false
+		}
+	case float64:
+		if int(reasons) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func auditIsolatedBrowserShields(cfg *config.Config) (issues []string, checkedCount int) {
+	if cfg == nil {
+		return nil, 0
+	}
+	profs, err := profile.List(cfg)
+	if err != nil {
+		return nil, 0
+	}
+	runningBrowsers := scanRunningIsolatedBrowsers()
+
+	for _, prof := range profs {
+		browserDir := strings.TrimSpace(prof.BrowserDir)
+		if browserDir == "" {
+			continue
+		}
+		defDir := filepath.Join(browserDir, "Default")
+		prefsPath := filepath.Join(defDir, "Preferences")
+		secPrefsPath := filepath.Join(defDir, "Secure Preferences")
+		extDir := filepath.Join(browserDir, "peace-shield-ext")
+		statePath := filepath.Join(browserDir, "peace-shield-state.json")
+
+		prefsRaw, prefsErr := os.ReadFile(prefsPath)
+		secRaw, secErr := os.ReadFile(secPrefsPath)
+		_, extDirErr := os.Stat(extDir)
+		if prefsErr != nil && secErr != nil && extDirErr != nil {
+			continue
+		}
+		checkedCount++
+		var profIssues []string
+
+		if prefsErr == nil && len(prefsRaw) > 0 {
+			var prefs map[string]any
+			if json.Unmarshal(prefsRaw, &prefs) == nil {
+				intl, _ := prefs["intl"].(map[string]any)
+				accStr, _ := intl["accept_languages"].(string)
+				selStr, _ := intl["selected_languages"].(string)
+				accLow := strings.ToLower(strings.TrimSpace(accStr))
+				selLow := strings.ToLower(strings.TrimSpace(selStr))
+				if intl == nil || strings.Contains(accLow, "zh") || strings.Contains(selLow, "zh") || accLow == "" || selLow == "" {
+					profIssues = append(profIssues, "Preferences含中文或缺失语言配置")
+				}
+				if dnt, _ := prefs["enable_do_not_track"].(bool); !dnt {
+					profIssues = append(profIssues, "未开启DNT")
+				}
+				profMap, _ := prefs["profile"].(map[string]any)
+				cs, _ := profMap["default_content_setting_values"].(map[string]any)
+				if geo, ok := cs["geolocation"].(float64); !ok || int(geo) != 2 {
+					profIssues = append(profIssues, "未禁Geolocation")
+				}
+			}
+		}
+
+		// Verify generated extension artifacts and upgraded capability markers.
+		_, mfErr := os.Stat(filepath.Join(extDir, "manifest.json"))
+		_, rulesErr := os.Stat(filepath.Join(extDir, "rules.json"))
+		_, bgErr := os.Stat(filepath.Join(extDir, "background.js"))
+		shieldRaw, shErr := os.ReadFile(filepath.Join(extDir, "shield.js"))
+		shieldStr := string(shieldRaw)
+		if mfErr != nil || rulesErr != nil || bgErr != nil || shErr != nil ||
+			!strings.Contains(shieldStr, "FontFaceSet") || !strings.Contains(shieldStr, "Worker") {
+			profIssues = append(profIssues, "护盾扩展待升级")
+		}
+
+		cleanExt := filepath.Clean(extDir)
+		foundLoaded, foundEnabled := false, false
+		for _, raw := range [][]byte{secRaw, prefsRaw} {
+			if len(raw) == 0 {
+				continue
+			}
+			var doc map[string]any
+			if json.Unmarshal(raw, &doc) != nil {
+				continue
+			}
+			exts, _ := doc["extensions"].(map[string]any)
+			settings, _ := exts["settings"].(map[string]any)
+			for _, val := range settings {
+				entry, ok := val.(map[string]any)
+				if !ok {
+					continue
+				}
+				extPath, _ := entry["path"].(string)
+				cleanPath := filepath.Clean(strings.TrimSpace(extPath))
+				manifest, _ := entry["manifest"].(map[string]any)
+				mName, _ := manifest["name"].(string)
+				matchPath := extPath != "" && (cleanPath == cleanExt || strings.HasSuffix(cleanPath, string(filepath.Separator)+"peace-shield-ext"))
+				matchName := strings.EqualFold(strings.TrimSpace(mName), "PeaceClaude Identity Shield")
+				if !matchPath && !matchName {
+					continue
+				}
+				foundLoaded = true
+				if isBrowserShieldEntryEnabled(entry) {
+					foundEnabled = true
+				}
+			}
+		}
+
+		proc, isRunning := runningBrowsers[filepath.Clean(browserDir)]
+		if isRunning {
+			if !proc.hasUnsafeExt || proc.debugPort <= 0 {
+				profIssues = append(profIssues, "运行中未开CDP护盾调试口")
+			} else {
+				stateOK := false
+				if stRaw, err := os.ReadFile(statePath); err == nil {
+					var st struct {
+						PID   int    `json:"pid"`
+						ExtID string `json:"ext_id"`
+					}
+					if json.Unmarshal(stRaw, &st) == nil && st.PID == proc.pid && strings.TrimSpace(st.ExtID) != "" {
+						stateOK = true
+					}
+				}
+				if !stateOK {
+					if foundLoaded && !foundEnabled {
+						profIssues = append(profIssues, "运行中护盾扩展被禁用")
+					} else if !foundEnabled {
+						profIssues = append(profIssues, "运行中未加载护盾")
+					} else {
+						profIssues = append(profIssues, "运行中护盾待热校验")
+					}
+				}
+			}
+		} else if foundLoaded && !foundEnabled {
+			profIssues = append(profIssues, "护盾扩展被禁用")
+		}
+
+		if len(profIssues) > 0 {
+			issues = append(issues, fmt.Sprintf("%s(%s)", prof.Name, strings.Join(profIssues, ",")))
+		}
+	}
+	return issues, checkedCount
 }

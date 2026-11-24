@@ -855,6 +855,20 @@ func (s *Server) handleDoctorFix(w http.ResponseWriter, r *http.Request) {
 			} else {
 				actions = append(actions, fmt.Sprintf("已接管 %d 个原生 Desktop 实例并启动隔离窗口 (PID=%d)", term, pid))
 			}
+		case "repair_browser_shields":
+			repaired, healed, warns := launcher.RepairIsolatedBrowserShields(ctx, &cfg)
+			if len(repaired) > 0 {
+				actions = append(actions, fmt.Sprintf("已清理离线隔离浏览器中文偏好并升级指纹护盾：%s", strings.Join(repaired, ", ")))
+			}
+			if len(healed) > 0 {
+				actions = append(actions, fmt.Sprintf("已无感热恢复运行中隔离浏览器护盾（保留全部标签页）：%s", strings.Join(healed, ", ")))
+			}
+			for _, wmsg := range warns {
+				errorsList = append(errorsList, wmsg)
+			}
+			if len(repaired) == 0 && len(healed) == 0 && len(warns) == 0 {
+				actions = append(actions, "全部隔离浏览器档案护盾已处于最新清洁状态")
+			}
 		case "recheck_egress":
 			if didRecheck {
 				return
@@ -1078,7 +1092,7 @@ func (s *Server) handleLaunchBrowser(w http.ResponseWriter, r *http.Request) {
 	if targetURL == "" {
 		targetURL = "https://claude.ai/login"
 	}
-	browser, pid, _, err := launcher.LaunchLoginBrowserWithPID(r.Context(), &cfg, s.selfBin, body.Profile, targetURL, false)
+	launchRes, err := launcher.LaunchLoginBrowserDetailed(r.Context(), &cfg, s.selfBin, body.Profile, targetURL, false)
 	if err != nil {
 		writeJSON(w, http.StatusPreconditionFailed, map[string]string{"error": err.Error()})
 		return
@@ -1089,11 +1103,15 @@ func (s *Server) handleLaunchBrowser(w http.ResponseWriter, r *http.Request) {
 	}
 	profile.TouchLastUsed(profName)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":      true,
-		"browser": browser,
-		"pid":     pid,
-		"profile": profName,
-		"url":     targetURL,
+		"ok":             true,
+		"browser":        launchRes.Browser,
+		"pid":            launchRes.PID,
+		"profile":        profName,
+		"url":            targetURL,
+		"shield_loaded":  launchRes.ShieldLoaded,
+		"shield_ext_id":  launchRes.ShieldExtID,
+		"shield_healed":  launchRes.ShieldHealed,
+		"shield_warning": launchRes.ShieldWarning,
 	})
 }
 

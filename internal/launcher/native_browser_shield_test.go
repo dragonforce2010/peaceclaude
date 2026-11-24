@@ -352,3 +352,217 @@ func TestInspectNativeBrowsersSecurePreferencesAndDisableReasons(t *testing.T) {
 		t.Fatalf("expected disabled chrome extension (disable_reasons=[8192]) to report loaded=true enabled=false level=network_only, got %+v", chrome)
 	}
 }
+
+func TestDeepFontIntlLocaleCompareAndWorkerWrapperSimulation(t *testing.T) {
+	nodeBin, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node unavailable for JS shield verification")
+	}
+
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	cfg := config.Default()
+	gate := egress.GateSnapshot{
+		Open:              true,
+		EffectiveTimezone: "America/Denver",
+		EffectiveLanguage: "en-US",
+	}
+	extDir, err := EnsureNativeBrowserShield(cfg, gate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rawRules, _ := os.ReadFile(filepath.Join(extDir, "rules.json"))
+	if !strings.Contains(string(rawRules), `"websocket"`) || !strings.Contains(string(rawRules), `"stylesheet"`) || !strings.Contains(string(rawRules), `"font"`) {
+		t.Fatalf("expected DNR rules to cover websocket/stylesheet/font resourceTypes: %s", string(rawRules))
+	}
+
+	harness := `
+const fs = require('fs');
+const vm = require('vm');
+function Nav() {}
+Nav.prototype = {
+  get language() { return 'zh-CN'; },
+  get languages() { return ['zh-CN', 'zh']; },
+  get doNotTrack() { return null; },
+  get connection() { return { effectiveType: '4g', downlink: 10 }; },
+};
+function WorkerNav() {}
+WorkerNav.prototype = {
+  get language() { return 'zh-CN'; },
+  get languages() { return ['zh-CN']; },
+  get doNotTrack() { return null; },
+  get connection() { return { effectiveType: '4g' }; },
+};
+function Canvas2D() { this._f = '12px Arial'; }
+Object.defineProperty(Canvas2D.prototype, 'font', {
+  get() { return this._f; },
+  set(v) { this._f = String(v); },
+  configurable: true,
+  enumerable: true,
+});
+function Offscreen2D() { this._f = '12px Arial'; }
+Object.defineProperty(Offscreen2D.prototype, 'font', {
+  get() { return this._f; },
+  set(v) { this._f = String(v); },
+  configurable: true,
+  enumerable: true,
+});
+function FakeFontFaceSet() {}
+FakeFontFaceSet.prototype.check = function(font) {
+  return true; // Simulates macOS system font match before shield
+};
+function FakeCSSStyle() { this._ff = ''; this._ct = ''; }
+Object.defineProperty(FakeCSSStyle.prototype, 'fontFamily', {
+  get() { return this._ff; },
+  set(v) { this._ff = String(v); },
+  configurable: true,
+  enumerable: true,
+});
+Object.defineProperty(FakeCSSStyle.prototype, 'cssText', {
+  get() { return this._ct; },
+  set(v) { this._ct = String(v); },
+  configurable: true,
+  enumerable: true,
+});
+FakeCSSStyle.prototype.setProperty = function(prop, val) {
+  if (String(prop).toLowerCase() === 'font-family') this._ff = String(val);
+};
+
+const createdBlobs = new Map();
+let seq = 0;
+class FakeBlob {
+  constructor(parts, opts) {
+    this.text = parts.join('');
+    this.type = opts && opts.type;
+  }
+}
+class FakeURL extends URL {}
+FakeURL.createObjectURL = (blob) => {
+  const u = 'blob:https://fuck-claude.app/' + (++seq);
+  createdBlobs.set(u, blob.text);
+  return u;
+};
+FakeURL.revokeObjectURL = (u) => { createdBlobs.delete(u); };
+
+let lastWorkerScriptURL = '';
+class OrigWorker {
+  constructor(url) { lastWorkerScriptURL = String(url); }
+}
+
+const ctx = {
+  window: null,
+  globalThis: null,
+  location: new URL('https://fuck-claude.app/'),
+  Navigator: Nav,
+  navigator: new Nav(),
+  CanvasRenderingContext2D: Canvas2D,
+  OffscreenCanvasRenderingContext2D: Offscreen2D,
+  FontFaceSet: FakeFontFaceSet,
+  CSSStyleDeclaration: FakeCSSStyle,
+  Worker: OrigWorker,
+  Blob: FakeBlob,
+  URL: FakeURL,
+  Date, Intl, Object, Array, Number, String, BigInt, Math, Proxy, Reflect, WeakMap, Set, Map, Function, JSON, setTimeout, console,
+};
+ctx.window = ctx;
+ctx.globalThis = ctx;
+vm.createContext(ctx);
+vm.runInContext(fs.readFileSync(process.argv[1], 'utf8'), ctx);
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), ctx);
+
+const ffs = new FakeFontFaceSet();
+const css = new FakeCSSStyle();
+css.fontFamily = '"PingFang SC", monospace';
+const cssByProp = new FakeCSSStyle();
+cssByProp.setProperty('font-family', '"Hiragino Sans GB", serif');
+const cssByText = new FakeCSSStyle();
+cssByText.cssText = 'color: red; font-family: "Microsoft YaHei", monospace;';
+
+let compareCalledWith = null;
+const origCompare = String.prototype.localeCompare;
+// Verify localeCompare wraps missing/empty locales while honoring explicit ones cleanly
+const cmpDefault = ctx.String.prototype.localeCompare.call('a', 'b');
+const cmpExplicit = ctx.String.prototype.localeCompare.call('a', 'b', 'de-DE');
+
+const w = new ctx.Worker('/turnstile-worker.js');
+const blobScript = createdBlobs.get(lastWorkerScriptURL) || '';
+
+// Run captured Worker blob script inside an isolated Worker VM context (with WorkerNavigator & mocked importScripts)
+let importedHref = '';
+const wCtx = {
+  globalThis: null,
+  self: null,
+  WorkerNavigator: WorkerNav,
+  navigator: new WorkerNav(),
+  OffscreenCanvasRenderingContext2D: Offscreen2D,
+  Date, Intl, Object, Array, Number, String, BigInt, Math, Proxy, Reflect, WeakMap, Set, Function, JSON, console,
+  importScripts(href) { importedHref = href; },
+};
+wCtx.globalThis = wCtx;
+wCtx.self = wCtx;
+vm.createContext(wCtx);
+vm.runInContext(blobScript, wCtx);
+
+const wOffscreen = new Offscreen2D();
+wOffscreen.font = '18px "PingFang SC", sans-serif';
+
+console.log(JSON.stringify({
+  fontCheckCJK: ffs.check('12px "PingFang SC"'),
+  fontCheckLatin: ffs.check('12px Arial'),
+  cssFontFamily: css.fontFamily,
+  cssPropFamily: cssByProp.fontFamily,
+  cssText: cssByText.cssText,
+  cmpOk: typeof cmpDefault === 'number' && typeof cmpExplicit === 'number',
+  workerInstance: w instanceof OrigWorker,
+  workerLang: wCtx.navigator.language,
+  workerLangs: Array.from(wCtx.navigator.languages),
+  workerGPC: wCtx.navigator.globalPrivacyControl,
+  workerLocale: wCtx.Intl.DateTimeFormat().resolvedOptions().locale,
+  workerTZ: wCtx.Intl.DateTimeFormat().resolvedOptions().timeZone,
+  workerConn: wCtx.navigator.connection.effectiveType,
+  workerCanvasFont: wOffscreen.font,
+  importedHref,
+}));
+`
+	cmd := exec.Command(nodeBin, "-e", harness, filepath.Join(extDir, "config.js"), filepath.Join(extDir, "shield.js"))
+	cmd.Env = append(os.Environ(), "TZ=Asia/Shanghai")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("deep shield simulation failed: %v (%s)", err, string(out))
+	}
+	var sim struct {
+		FontCheckCJK     bool     `json:"fontCheckCJK"`
+		FontCheckLatin   bool     `json:"fontCheckLatin"`
+		CSSFontFamily    string   `json:"cssFontFamily"`
+		CSSPropFamily    string   `json:"cssPropFamily"`
+		CSSText          string   `json:"cssText"`
+		CmpOk            bool     `json:"cmpOk"`
+		WorkerInstance   bool     `json:"workerInstance"`
+		WorkerLang       string   `json:"workerLang"`
+		WorkerLangs      []string `json:"workerLangs"`
+		WorkerGPC        bool     `json:"workerGPC"`
+		WorkerLocale     string   `json:"workerLocale"`
+		WorkerTZ         string   `json:"workerTZ"`
+		WorkerConn       string   `json:"workerConn"`
+		WorkerCanvasFont string   `json:"workerCanvasFont"`
+		ImportedHref     string   `json:"importedHref"`
+	}
+	if err := json.Unmarshal(out, &sim); err != nil {
+		t.Fatalf("parse deep sim json: %v (%s)", err, string(out))
+	}
+	if sim.FontCheckCJK || !sim.FontCheckLatin {
+		t.Fatalf("expected CJK FontFaceSet.check=false and Latin=true, got %+v", sim)
+	}
+	if strings.Contains(sim.CSSFontFamily, "PingFang") || strings.Contains(sim.CSSPropFamily, "Hiragino") || strings.Contains(sim.CSSText, "Microsoft YaHei") {
+		t.Fatalf("expected CSSStyleDeclaration setters to strip CJK fonts, got %+v", sim)
+	}
+	if !strings.Contains(sim.CSSText, "color: red;") {
+		t.Fatalf("expected unrelated cssText styles preserved, got %q", sim.CSSText)
+	}
+	if !sim.CmpOk || !sim.WorkerInstance || sim.WorkerLang != "en-US" || sim.WorkerLocale != "en-US" || sim.WorkerTZ != "America/Denver" || !sim.WorkerGPC || sim.WorkerConn != "4g" {
+		t.Fatalf("unexpected worker/locale simulation state: %+v", sim)
+	}
+	if strings.Contains(sim.WorkerCanvasFont, "PingFang") || sim.ImportedHref != "https://fuck-claude.app/turnstile-worker.js" {
+		t.Fatalf("unexpected worker font/importHref: %+v", sim)
+	}
+}

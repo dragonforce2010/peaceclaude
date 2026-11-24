@@ -62,7 +62,18 @@ var (
 		"claudeusercontent.com",
 	}
 
-	defaultAuthDomains = []string{
+	defaultChallengeBillingDomains = []string{
+		"hcaptcha.com",
+		"challenges.cloudflare.com",
+		"turnstile.cloudflare.com",
+		"stripe.com",
+		"js.stripe.com",
+		"m.stripe.network",
+		"stripe.network",
+		"stytch.com",
+	}
+
+	defaultAuthDomains = append([]string{
 		"accounts.google.com",
 		"oauth2.googleapis.com",
 		"oauthaccountmanager.googleapis.com",
@@ -75,17 +86,9 @@ var (
 		"fonts.gstatic.com",
 		"encrypted-tbn0.gstatic.com",
 		"lh3.googleusercontent.com",
-		"hcaptcha.com",
-		"challenges.cloudflare.com",
-		"turnstile.cloudflare.com",
 		"appleid.apple.com",
 		"idmsa.apple.com",
-		"stripe.com",
-		"js.stripe.com",
-		"m.stripe.network",
-		"stripe.network",
-		"stytch.com",
-	}
+	}, defaultChallengeBillingDomains...)
 
 	defaultTelemetryDomains = []string{
 		"sentry.io",
@@ -113,6 +116,23 @@ func ClaudeDomains() []string {
 // AuthDomains returns a defensive copy of built-in OAuth/captcha/billing auth domains.
 func AuthDomains() []string {
 	return append([]string(nil), defaultAuthDomains...)
+}
+
+// ChallengeBillingDomains returns embedded captcha, billing, and session verification domains
+// that share page context with Claude web/desktop flows and must share static-IP egress.
+func ChallengeBillingDomains() []string {
+	return append([]string(nil), defaultChallengeBillingDomains...)
+}
+
+// IsChallengeBillingDomain reports whether host belongs to built-in captcha/billing/session domains.
+func IsChallengeBillingDomain(host string) bool {
+	h := normalizeHost(host)
+	for _, d := range defaultChallengeBillingDomains {
+		if matchesDomain(h, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // TelemetryDomains returns a defensive copy of built-in telemetry sink domains.
@@ -344,7 +364,10 @@ func (e *Engine) Evaluate(hostport string, gateOpen bool, gateReason string) Dec
 		return dec
 
 	case CategoryAuth:
-		if cfg == nil || !cfg.Shield.ProxyAuthDomains {
+		// Keep interactive OAuth (Google/Apple) direct unless ProxyAuthDomains=true, while
+		// embedded captcha/billing/session flows (Turnstile/hCaptcha/Stripe/Stytch) that reach
+		// the gateway must stay on the static residential egress IP to avoid split-IP flags.
+		if !IsChallengeBillingDomain(host) && (cfg == nil || !cfg.Shield.ProxyAuthDomains) {
 			dec.Action = ActionDirectLocal
 			dec.Reason = "direct via normal host network (strict Claude-only proxy mode)"
 			return dec

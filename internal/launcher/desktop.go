@@ -189,6 +189,19 @@ func BuildChromiumProxyArgs(cfg *config.Config) []string {
 	if cfg == nil {
 		cfg = config.Default()
 	}
+	return buildChromiumProxyArgsWithPACURL(cfg, cfg.DesktopPACURL())
+}
+
+// BuildLoginBrowserProxyArgs returns Chromium network flags for isolated login browsers,
+// routing Claude, telemetry, and embedded challenge/billing domains consistently via mode=login PAC.
+func BuildLoginBrowserProxyArgs(cfg *config.Config) []string {
+	if cfg == nil {
+		cfg = config.Default()
+	}
+	return buildChromiumProxyArgsWithPACURL(cfg, cfg.LoginBrowserPACURL())
+}
+
+func buildChromiumProxyArgsWithPACURL(cfg *config.Config, pacURL string) []string {
 	if cfg.EffectiveDesktopProxyMode() == "proxy" {
 		return []string{
 			"--proxy-server=" + cfg.HTTPProxyURL(),
@@ -196,7 +209,7 @@ func BuildChromiumProxyArgs(cfg *config.Config) []string {
 		}
 	}
 	return []string{
-		"--proxy-pac-url=" + cfg.DesktopPACURL(),
+		"--proxy-pac-url=" + pacURL,
 	}
 }
 

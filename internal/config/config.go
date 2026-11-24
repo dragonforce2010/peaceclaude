@@ -578,6 +578,10 @@ func (c *Config) DesktopPACURL() string {
 	return c.ControlURL() + "/peaceclaude.pac?mode=desktop"
 }
 
+func (c *Config) LoginBrowserPACURL() string {
+	return c.ControlURL() + "/peaceclaude.pac?mode=login"
+}
+
 func Load() (*Config, error) {
 	if err := EnsureDirs(); err != nil {
 		return nil, err
