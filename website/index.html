@@ -61,13 +61,13 @@
           <h1 data-i18n="hero_title">Native OS Speed.<br/>Deterministic Static-IP Safety.</h1>
 
           <p class="hero-lead" data-i18n="hero_lead">
-            Ditch the 8 GB Linux VM without risking naked proxy leaks. PeaceClaude wraps Claude Desktop, Claude Code CLI, and your native Arc &amp; Chrome browsers in a Fail-Closed static-IP gate across macOS, Windows, and Ubuntu — paired with our native PeaceSwitch iOS companion app.
+            Ditch the 6 GB Linux VM without risking naked proxy leaks. PeaceClaude wraps Claude Desktop, Claude Code CLI, and your native Arc &amp; Chrome browsers in a Fail-Closed static-IP gate across macOS, Windows, and Ubuntu — paired with our native PeaceSwitch iOS companion app.
           </p>
 
           <div class="hero-cta-row">
             <a class="btn btn-primary btn-lg" href="#guide" data-i18n="hero_cta_primary">Read 4-Platform Guide</a>
             <button type="button" class="btn btn-secondary btn-lg" id="btn-hero-copy">
-              <code id="hero-copy-cmd">./install.sh</code>
+              <code id="hero-copy-cmd">curl -fsSL https://dragonforce2010.github.io/peaceclaude/install.sh | bash</code>
               <span class="copy-tag" id="hero-copy-tag" data-i18n="copy_label">Copy</span>
             </button>
           </div>
@@ -212,8 +212,8 @@
             <article class="eco-card">
               <div class="eco-badge">03 · WEB</div>
               <div>
-                <h3 data-i18n="eco_web_t">Embedded Local Workbench (`:18899`)</h3>
-                <p data-i18n="eco_web_d">Runs seamlessly offline inside your loopback interface with 11-point Security Doctor, Appearance Studio themes, 403 network/auth triage, and one-click MV3 native browser setup.</p>
+                <h3 data-i18n="eco_web_t">Embedded Local Workbench (<code>:18899</code>)</h3>
+                <p data-i18n="eco_web_d">Runs seamlessly offline inside your loopback interface with 11-point Security Doctor, configurable domain routing policy, Appearance Studio themes, 403 triage, and one-click MV3 setup.</p>
               </div>
             </article>
           </div>
@@ -237,35 +237,92 @@
                 <span class="ios-gate-pill" id="ios-gate-pill">OPEN</span>
               </div>
 
-              <div class="ios-egress-card">
-                <div class="ios-egress-lbl" data-i18n="ios_mock_ip_lbl">Verified Static Egress</div>
-                <div class="ios-egress-ip mono" id="ios-egress-ip">198.51.100.42</div>
-                <div class="ios-egress-meta mono" id="ios-egress-meta">Cheyenne, US · en0 Bypass · 84 ms</div>
-                <button type="button" class="ios-lock-btn" id="btn-ios-lock" data-i18n="ios_mock_lock_btn">Trigger Emergency Lock</button>
+              <div class="ios-body">
+                <div class="ios-view" id="ios-view-cockpit">
+                  <div class="ios-egress-card">
+                    <div class="ios-egress-lbl" data-i18n="ios_mock_ip_lbl">Verified Static Egress</div>
+                    <div class="ios-egress-ip mono" id="ios-egress-ip">198.51.100.42</div>
+                    <div class="ios-egress-meta mono" id="ios-egress-meta">Cheyenne, US · en0 Bypass · 84 ms</div>
+                    <button type="button" class="ios-lock-btn" id="btn-ios-lock" data-i18n="ios_mock_lock_btn">Trigger Emergency Lock</button>
+                  </div>
+
+                  <div class="ios-accounts-wrap">
+                    <div class="ios-sec-title" data-i18n="ios_mock_acc_lbl">Isolated Accounts (Tap to Switch)</div>
+                    <button type="button" class="ios-acc-row active" data-ios-acc="alpha">
+                      <div>
+                        <strong>Alpha Studio <span class="ios-plan">Pro</span></strong>
+                        <small data-i18n="ios_mock_q1">5h 38% · Weekly 54%</small>
+                      </div>
+                      <span class="ios-active-tag" data-i18n="ios_mock_active">ACTIVE</span>
+                    </button>
+                    <button type="button" class="ios-acc-row" data-ios-acc="gamma">
+                      <div>
+                        <strong>Gamma Sandbox <span class="ios-plan">Free</span></strong>
+                        <small data-i18n="ios_mock_q2">Free tier · no 5h/Weekly bucket</small>
+                      </div>
+                      <span class="ios-active-tag muted" data-i18n="ios_mock_standby">STANDBY</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="ios-view hidden" id="ios-view-accounts">
+                  <div class="ios-sec-title" data-i18n="ios_acc_view_title">All Isolated Profiles (Tap to Switch)</div>
+                  <button type="button" class="ios-acc-row active" data-ios-acc="alpha">
+                    <div>
+                      <strong>Alpha Studio <span class="ios-plan">Pro</span></strong>
+                      <small data-i18n="ios_acc_alpha_sub">5h 38% · Weekly 54% · uuid-0a91</small>
+                    </div>
+                    <span class="ios-active-tag" data-i18n="ios_mock_active">ACTIVE</span>
+                  </button>
+                  <button type="button" class="ios-acc-row" data-ios-acc="beta">
+                    <div>
+                      <strong>Beta Research <span class="ios-plan">Max</span></strong>
+                      <small data-i18n="ios_acc_beta_sub">5h 12% · Weekly 29% · uuid-4f20</small>
+                    </div>
+                    <span class="ios-active-tag muted" data-i18n="ios_mock_standby">STANDBY</span>
+                  </button>
+                  <button type="button" class="ios-acc-row" data-ios-acc="gamma">
+                    <div>
+                      <strong>Gamma Sandbox <span class="ios-plan">Free</span></strong>
+                      <small data-i18n="ios_mock_q2">Free tier · no 5h/Weekly bucket</small>
+                    </div>
+                    <span class="ios-active-tag muted" data-i18n="ios_mock_standby">STANDBY</span>
+                  </button>
+                </div>
+
+                <div class="ios-view hidden" id="ios-view-security">
+                  <div class="ios-sec-card">
+                    <div>
+                      <strong data-i18n="ios_sec_head">11-Point Security Doctor</strong>
+                      <small data-i18n="ios_sec_sub">Zero host leaks · SOCKS5 remote DNS</small>
+                    </div>
+                    <span class="ios-sec-score mono" id="ios-sec-score">100</span>
+                  </div>
+                  <div class="ios-sec-list">
+                    <div class="ios-sec-row">
+                      <span data-i18n="ios_sec_pac">Desktop Routing</span>
+                      <code id="ios-sec-pac-val">PAC DIRECT</code>
+                    </div>
+                    <div class="ios-sec-row">
+                      <span data-i18n="ios_sec_pf">Kernel Anchor (pf)</span>
+                      <code id="ios-sec-pf-val">ARMED</code>
+                    </div>
+                    <div class="ios-sec-row">
+                      <span data-i18n="ios_sec_dns">WebRTC &amp; QUIC</span>
+                      <code id="ios-sec-dns-val">LOCKED</code>
+                    </div>
+                    <div class="ios-sec-row" data-sec-gate="true">
+                      <span data-i18n="ios_sec_gate">Fail-Closed Gate</span>
+                      <code id="ios-sec-gate-val">OPEN</code>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div class="ios-accounts-wrap">
-                <div class="ios-sec-title" data-i18n="ios_mock_acc_lbl">Isolated Accounts (Tap to Switch)</div>
-                <button type="button" class="ios-acc-row active" data-ios-acc="alpha">
-                  <div>
-                    <strong>Alpha Studio <span class="ios-plan">Pro</span></strong>
-                    <small data-i18n="ios_mock_q1">5h 38% · Weekly 54%</small>
-                  </div>
-                  <span class="ios-active-tag" data-i18n="ios_mock_active">ACTIVE</span>
-                </button>
-                <button type="button" class="ios-acc-row" data-ios-acc="gamma">
-                  <div>
-                    <strong>Gamma Sandbox <span class="ios-plan">Free</span></strong>
-                    <small data-i18n="ios_mock_q2">Free tier · no 5h/Weekly bucket</small>
-                  </div>
-                  <span class="ios-active-tag muted" data-i18n="ios_mock_standby">STANDBY</span>
-                </button>
-              </div>
-
-              <div class="ios-tabbar">
-                <span class="active" data-i18n="ios_tab_cockpit">Cockpit</span>
-                <span data-i18n="ios_tab_accounts">Accounts</span>
-                <span data-i18n="ios_tab_security">Security</span>
+              <div class="ios-tabbar" id="ios-tabbar" role="tablist" aria-label="PeaceSwitch App Views">
+                <button type="button" class="ios-tab-btn active" role="tab" aria-selected="true" data-ios-tab="cockpit" data-i18n="ios_tab_cockpit">Cockpit</button>
+                <button type="button" class="ios-tab-btn" role="tab" aria-selected="false" data-ios-tab="accounts" data-i18n="ios_tab_accounts">Accounts</button>
+                <button type="button" class="ios-tab-btn" role="tab" aria-selected="false" data-ios-tab="security" data-i18n="ios_tab_security">Security</button>
               </div>
             </div>
           </div>
@@ -278,15 +335,15 @@
       <div class="container">
         <div class="section-head">
           <div class="section-kicker" data-i18n="cmp_kicker">ZERO-VM ENGINEERING</div>
-          <h2 data-i18n="cmp_title">Why carry an 8 GB Linux VM just to lock an IP and timezone?</h2>
-          <p data-i18n="cmp_desc">PeaceClaude enforces deterministic network fail-closing and browser/CLI fingerprint alignment at the OS user-space + pf kernel boundary — keeping macOS instant, silent, and battery-friendly.</p>
+          <h2 data-i18n="cmp_title">18 MB native daemon. No 6 GB VM required.</h2>
+          <p data-i18n="cmp_desc">PeaceClaude enforces deterministic Fail-Closed routing and domain-scoped fingerprint alignment directly on your host OS + kernel firewall — keeping your workstation instant, silent, and battery-friendly.</p>
         </div>
 
         <div class="bench-grid">
           <div class="bench-card">
             <div class="bench-head">
               <strong data-i18n="b_ram_title">Resident Memory</strong>
-              <span class="bench-delta">340× lighter</span>
+              <span class="bench-delta" data-i18n="b_ram_delta">340× lighter</span>
             </div>
             <div class="bar-pair">
               <div class="bar-row">
@@ -305,7 +362,7 @@
           <div class="bench-card">
             <div class="bench-head">
               <strong data-i18n="b_boot_title">Ready-to-Code Startup</strong>
-              <span class="bench-delta">150× faster</span>
+              <span class="bench-delta" data-i18n="b_boot_delta">150× faster</span>
             </div>
             <div class="bar-pair">
               <div class="bar-row">
@@ -324,7 +381,7 @@
           <div class="bench-card">
             <div class="bench-head">
               <strong data-i18n="b_disk_title">Disk Footprint</strong>
-              <span class="bench-delta">1,000× smaller</span>
+              <span class="bench-delta" data-i18n="b_disk_delta">1,000× smaller</span>
             </div>
             <div class="bar-pair">
               <div class="bar-row">
@@ -342,8 +399,8 @@
 
           <div class="bench-card">
             <div class="bench-head">
-              <strong data-i18n="b_vpn_title">Corporate VPN (Feilian / Cisco)</strong>
-              <span class="bench-delta">Zero conflict</span>
+              <strong data-i18n="b_vpn_title">Corporate VPN Coexistence</strong>
+              <span class="bench-delta" data-i18n="b_vpn_delta">Zero conflict</span>
             </div>
             <div class="bar-pair">
               <div class="bar-row">
@@ -422,18 +479,18 @@
 
         <div class="showcase-shell">
           <div class="showcase-tabs" id="showcase-tabs" role="tablist" aria-label="Workbench Screenshots">
-            <button type="button" class="sc-tab active" role="tab" aria-selected="true" data-shot="accounts-overview.png" data-i18n="tab_acc" data-caption-en="Multi-account Hero cockpit with Pro 5h/Weekly telemetry bars, Free tier status, per-account security scores, and standby roster." data-caption-zh="三段式多账号焦点工作台：Pro 5h/Weekly 双列配额、Free 清晰提示、单账号安全得分与一键切号。">Multi-Account</button>
-            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="security-doctor.png" data-i18n="tab_sec" data-caption-en="11/11 Security Doctor with live ring score, zero-clutter passed checks, browser fingerprint audit, and 1-click remediation." data-caption-zh="11/11 全链路安全体检：实时评分环、精简无冗余的通过项、浏览器指纹自检与 403 三分诊。">Security Doctor</button>
-            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="native-browser-shield.png" data-i18n="tab_nb" data-caption-en="Multi-select native browser protection combining Claude-only PAC with domain-scoped MV3 Identity Shield detection." data-caption-zh="原生浏览器多选护航：结合仅分流 Claude 的系统 PAC 与域名定向 MV3 护航扩展实时状态扫描。">Native Browser Shield</button>
-            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="appearance-studio.png" data-i18n="tab_app" data-caption-en="Appearance Studio with 6 light + 6 dark curated palettes, live miniature console stage, and custom accent pickers." data-caption-zh="外观工坊：浅深共 12 套原创调色板、实时微缩画布与字体尺度微调。">Appearance Studio</button>
-            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="remote-pair.png" data-i18n="tab_rem" data-caption-en="LAN / Tailscale mobile pairing pass with 120s countdown and instant device revocation." data-caption-zh="零云端中继的局域网 / Tailscale 手机扫码配对通行证，带 120 秒倒计时与随手踢除。">Mobile Pairing</button>
-            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="cli-guide.png" data-i18n="tab_cli" data-caption-en="Built-in categorized CLI launcher &amp; safety command cheatsheet with 1-click clipboard copy." data-caption-zh="内置四分类 CLI 终端命令速查与 PAC 安全提示，任意指令一键复制。">CLI Guide</button>
+            <button type="button" class="sc-tab active" role="tab" aria-selected="true" data-shot="accounts-overview.png" data-i18n="tab_acc" data-title-en="PeaceClaude — Multi-Account Cockpit · v0.2.0" data-title-zh="PeaceClaude — 多账号焦点工作台 · v0.2.0" data-caption-en="Multi-account Hero cockpit with Pro 5h/Weekly telemetry bars, Free tier status, per-account security scores, and standby roster." data-caption-zh="三段式多账号焦点工作台：Pro 5h/Weekly 双列配额、Free 清晰提示、单账号安全得分与一键切号。">Multi-Account</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="security-doctor.png" data-i18n="tab_sec" data-title-en="PeaceClaude — 11-Point Security Doctor · v0.2.0" data-title-zh="PeaceClaude — 11 项安全体检 · v0.2.0" data-caption-en="11/11 Security Doctor with live ring score, zero-clutter passed checks, browser fingerprint audit, and 1-click remediation." data-caption-zh="11/11 全链路安全体检：实时评分环、精简无冗余的通过项、浏览器指纹自检与 403 三分诊。">Security Doctor</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="native-browser-shield.png" data-i18n="tab_nb" data-title-en="PeaceClaude — Native Browser Shield · v0.2.0" data-title-zh="PeaceClaude — 原生浏览器护航 · v0.2.0" data-caption-en="Multi-select native browser protection combining Claude-only PAC with domain-scoped MV3 Identity Shield detection." data-caption-zh="原生浏览器多选护航：结合仅分流 Claude 的系统 PAC 与域名定向 MV3 护航扩展实时状态扫描。">Native Browser Shield</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="appearance-studio.png" data-i18n="tab_app" data-title-en="PeaceClaude — Appearance Studio · v0.2.0" data-title-zh="PeaceClaude — 外观工坊 · v0.2.0" data-caption-en="Appearance Studio with 6 light + 6 dark curated palettes, live miniature console stage, and custom accent pickers." data-caption-zh="外观工坊：浅深共 12 套原创调色板、实时微缩画布与字体尺度微调。">Appearance Studio</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="remote-pair.png" data-i18n="tab_rem" data-title-en="PeaceClaude — Mobile Remote Pairing · v0.2.0" data-title-zh="PeaceClaude — 手机远程扫码配对 · v0.2.0" data-caption-en="LAN / Tailscale mobile pairing pass with 120s countdown and instant device revocation." data-caption-zh="零云端中继的局域网 / Tailscale 手机扫码配对通行证，带 120 秒倒计时与随手踢除。">Mobile Pairing</button>
+            <button type="button" class="sc-tab" role="tab" aria-selected="false" data-shot="cli-guide.png" data-i18n="tab_cli" data-title-en="PeaceClaude — Categorized CLI Cheatsheet · v0.2.0" data-title-zh="PeaceClaude — 终端 CLI 速查手册 · v0.2.0" data-caption-en="Built-in categorized CLI launcher &amp; safety command cheatsheet with 1-click clipboard copy." data-caption-zh="内置四分类 CLI 终端命令速查与 PAC 安全提示，任意指令一键复制。">CLI Guide</button>
           </div>
 
           <div class="window-frame">
             <div class="window-chrome">
               <span class="win-dots"><i></i><i></i><i></i></span>
-              <span class="win-title mono">PeaceClaude — Multi-Account Cockpit · v0.2.0</span>
+              <span class="win-title mono" id="showcase-win-title">PeaceClaude — Multi-Account Cockpit · v0.2.0</span>
             </div>
             <img id="showcase-img" src="assets/accounts-overview.png" alt="PeaceClaude Workbench Screenshot" class="showcase-img" />
           </div>
@@ -468,8 +525,8 @@
             <p data-i18n="faq_a4">Launch PeaceSwitch on iPhone and tap "Launch Interactive Demo Mode" on the pairing screen. You can test profile switching, Pro/Max vs Free quota display, emergency fail-closed gate locks, and PAC toggles completely offline with zero server setup.</p>
           </details>
           <details class="faq-item">
-            <summary data-i18n="faq_q5">How do I host this website on peace-claude.app while keeping my repo private?</summary>
-            <p data-i18n="faq_a5">The <code>website/</code> folder has zero build dependencies. Deploy it directly via Vercel or Cloudflare Pages with Root Directory set to <code>website</code> and bind your <code>peace-claude.app</code> DNS records—your GitHub source repo can stay Private permanently. GitHub Pages workflow <code>.github/workflows/pages.yml</code> is also included.</p>
+            <summary data-i18n="faq_q5">Can Claude Desktop open internal corporate SSO and intranet pages cleanly?</summary>
+            <p data-i18n="faq_a5">Yes. PeaceClaude defaults to smart desktop PAC mode (<code>desktop_proxy_mode: "pac"</code>), routing Claude and telemetry through your static US node while keeping arbitrary intranet SSO pages, private CDNs, and private IPs <code>DIRECT</code>. You can customize routing rules anytime in the Network &amp; Policy console tab.</p>
           </details>
         </div>
       </div>
@@ -499,14 +556,12 @@
             <button type="button" class="ins-tab" role="tab" aria-selected="false" data-mode="ios">iOS (PeaceSwitch)</button>
           </div>
 
-          <pre class="install-code" id="install-code"><code># macOS Universal (Apple Silicon + Intel)
-tar -xzf peaceclaude-v0.2.0-macos-universal.tar.gz
-cd peaceclaude-v0.2.0-macos-universal
-./install.sh
+          <pre class="install-code" id="install-code"><code># macOS Universal (Apple Silicon + Intel) — Run directly
+curl -fsSL https://dragonforce2010.github.io/peaceclaude/install.sh | bash
 peaceclaude status --check</code></pre>
 
           <div class="install-foot">
-            <a class="btn btn-primary" id="btn-download-mac" href="https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-macos-universal.dmg" target="_blank" rel="noopener" data-i18n="ins_dl_btn">Download macOS DMG</a>
+            <a class="btn btn-primary" id="btn-download-mac" href="https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-macos-universal.dmg" title="PeaceClaude-v0.2.0-macos-universal.dmg" target="_blank" rel="noopener" data-i18n="ins_dl_btn">Download</a>
             <button type="button" class="btn btn-secondary" id="btn-copy-install" data-i18n="ins_copy">Copy Steps</button>
             <a class="btn btn-ghost" href="https://github.com/dragonforce2010/peaceclaude/releases/latest" target="_blank" rel="noopener" data-i18n="ins_docs">All Releases</a>
           </div>

@@ -14,7 +14,7 @@
       cta_download_short: 'Quickstart',
       hero_eyebrow: 'macOS · Windows · Ubuntu · iOS PeaceSwitch · ~18 MB Zero-VM',
       hero_title: 'Native OS Speed.<br/>Deterministic Static-IP Safety.',
-      hero_lead: 'Ditch the 8 GB Linux VM without risking naked proxy leaks. PeaceClaude wraps Claude Desktop, Claude Code CLI, and your native Arc & Chrome browsers in a Fail-Closed static-IP gate across macOS, Windows, and Ubuntu — paired with our native PeaceSwitch iOS companion app.',
+      hero_lead: 'Ditch the 6 GB Linux VM without risking naked proxy leaks. PeaceClaude wraps Claude Desktop, Claude Code CLI, and your native Arc &amp; Chrome browsers in a Fail-Closed static-IP gate across macOS, Windows, and Ubuntu — paired with our native PeaceSwitch iOS companion app.',
       hero_cta_primary: 'Read 4-Platform Guide',
       copy_label: 'Copy',
       metric_ram: 'Daemon RAM',
@@ -26,38 +26,51 @@
       deck_score_label: 'Risk Score',
       dk_egress: 'Egress Route',
       dk_tz: 'Runtime Timezone',
-      dk_locale: 'Locale & Fonts',
+      dk_locale: 'Locale &amp; Fonts',
       dk_kernel: 'Kernel / Drop Safety',
       guide_kicker: 'INTERACTIVE QUICKSTART PLAYBOOK',
       guide_title: 'Up and guarded across 4 platforms in under 2 minutes.',
-      guide_desc: 'Select your platform below for step-by-step setup: install daemon, bind your static residential egress, shield your desktop/CLI/browser, and pair PeaceSwitch on iPhone.',
+      guide_desc: 'Select your platform below for runnable one-line setup commands: install daemon, bind your static residential egress, shield your desktop/CLI/browser, and pair PeaceSwitch on iPhone.',
       eco_kicker: '3-PLATFORM ECOSYSTEM',
       eco_title: 'One static-IP brain. Every screen in sync.',
       eco_desc: 'Manage accounts and fail-closed locks wherever you are — native SwiftUI on iOS, local browser console on desktop, and cross-platform Go CLI/daemon across macOS, Windows, and Ubuntu.',
       eco_pc_t: 'macOS · Windows · Ubuntu Linux',
-      eco_pc_d: 'Unified single-binary Go daemon (<code>peaceclaude</code>), OS-native autostart (LaunchAgent / Registry Run / systemd --user), scoped browser PAC, and macOS physical interface VPN bypass (<code>IP_BOUND_IF</code>).',
+      eco_pc_d: 'Unified single-binary Go daemon (<code>peaceclaude</code>), OS-native autostart (LaunchAgent / Registry Run / systemd --user), smart desktop/browser PAC, and macOS physical interface VPN bypass (<code>IP_BOUND_IF</code>).',
       eco_ios_t: 'PeaceSwitch for iPhone (Pure SwiftUI)',
       eco_ios_d: '100% native SwiftUI with AVFoundation QR pairing, iOS Keychain tokens, haptic Fail-Closed Kill Switch, live Pro/Max vs Free quota readout, and zero-server Interactive Demo Mode.',
-      eco_web_t: 'Embedded Local Workbench (:18899)',
-      eco_web_d: 'Runs seamlessly offline inside your loopback interface with 11-point Security Doctor, Appearance Studio themes, 403 network/auth triage, and one-click MV3 native browser setup.',
+      eco_web_t: 'Embedded Local Workbench (<code>:18899</code>)',
+      eco_web_d: 'Runs seamlessly offline inside your loopback interface with 11-point Security Doctor, configurable domain routing policy, Appearance Studio themes, 403 triage, and one-click MV3 setup.',
       ios_mock_title: 'PeaceSwitch Cockpit',
       ios_mock_ip_lbl: 'Verified Static Egress',
       ios_mock_acc_lbl: 'Isolated Accounts (Tap to Switch)',
+      ios_acc_view_title: 'All Isolated Profiles (Tap to Switch)',
+      ios_acc_alpha_sub: '5h 38% · Weekly 54% · uuid-0a91',
+      ios_acc_beta_sub: '5h 12% · Weekly 29% · uuid-4f20',
       ios_mock_q1: '5h 38% · Weekly 54%',
       ios_mock_q2: 'Free tier · no 5h/Weekly bucket',
       ios_mock_lock_btn: 'Trigger Emergency Lock',
       ios_mock_active: 'ACTIVE',
       ios_mock_standby: 'STANDBY',
+      ios_sec_head: '11-Point Security Doctor',
+      ios_sec_sub: 'Zero host leaks · SOCKS5 remote DNS',
+      ios_sec_pac: 'Desktop Routing',
+      ios_sec_pf: 'Kernel Anchor (pf)',
+      ios_sec_dns: 'WebRTC &amp; QUIC',
+      ios_sec_gate: 'Fail-Closed Gate',
       ios_tab_cockpit: 'Cockpit',
       ios_tab_accounts: 'Accounts',
       ios_tab_security: 'Security',
       cmp_kicker: 'ZERO-VM ENGINEERING',
-      cmp_title: 'Why carry an 8 GB Linux VM just to lock an IP and timezone?',
-      cmp_desc: 'PeaceClaude enforces deterministic network fail-closing and browser/CLI fingerprint alignment at the OS user-space + kernel boundary — keeping your workstation instant, silent, and battery-friendly.',
+      cmp_title: '18 MB native daemon. No 6 GB VM required.',
+      cmp_desc: 'PeaceClaude enforces deterministic Fail-Closed routing and domain-scoped fingerprint alignment directly on your host OS + kernel firewall — keeping your workstation instant, silent, and battery-friendly.',
       b_ram_title: 'Resident Memory',
+      b_ram_delta: '340× lighter',
       b_boot_title: 'Ready-to-Code Startup',
+      b_boot_delta: '150× faster',
       b_disk_title: 'Disk Footprint',
+      b_disk_delta: '1,000× smaller',
       b_vpn_title: 'Corporate VPN Coexistence',
+      b_vpn_delta: 'Zero conflict',
       lbl_vm: 'Linux Desktop VM',
       lbl_tun: 'System TUN / VM Bridge',
       val_no_tun: 'No TUN · Coexists',
@@ -67,19 +80,19 @@
       bento_desc: 'From kernel packet anchors to browser MV3 Content Scripts, every surface stays aligned with your active profile.',
       f1_t: 'Fail-Closed Egress Gate + Firewall',
       f1_d: '4-source parallel IP probe verifies your static node. On any IP drift or manual lock, the gateway returns hard 503, severs active streams, and drops direct leaks.',
-      f2_t: 'Native Arc & Chrome MV3 Shield',
-      f2_d: 'Select Arc, Chrome, Brave, or Edge in the console: pairs Claude-only PAC routing with a domain-scoped MV3 extension achieving 2/100 LOW RISK without touching Slack, Lark, or work tabs.',
+      f2_t: 'Smart Desktop PAC &amp; Browser Shield',
+      f2_d: 'Smart desktop PAC plus domain-scoped MV3 shielding across Arc, Chrome, Brave, and Edge — keeping Slack, Lark, and corporate SSO direct while locking Claude to your static US egress.',
       f3_t: 'Isolated Multi-Account Cockpit',
-      f3_d: 'Separate config, Desktop user-data-dir, cookies, and UUID per account. Detects Free vs Pro/Max automatically, routes claude:// OAuth callbacks strictly to the active window.',
-      f4_t: '11-Point Doctor & 403 Triage',
+      f3_d: 'Separate config, Desktop user-data-dir, cookies, and UUID per account. Detects Free vs Pro/Max automatically and routes claude:// OAuth callbacks strictly to the active window.',
+      f4_t: '11-Point Doctor &amp; 403 Triage',
       f4_d: 'Verifies remote SOCKS5 DNS, --disable-quic, WebRTC UDP suppression, and host socket scans. Smart 3-way diagnose separates transient network drops from real auth expiration.',
-      f5_t: 'LAN & Tailscale PeaceSwitch iOS',
+      f5_t: 'LAN &amp; Tailscale PeaceSwitch iOS',
       f5_d: 'Issue 120-second ISO-18004 SVG QR pairing passes backed by SHA-256 Bearer tokens to check quotas, swap active profiles, or lock egress from PeaceSwitch on iPhone.',
       f6_t: '30-Day Redacted Observability',
       f6_d: 'Local packet capture and Split-IP leak logs strip Authorization headers, Cookies, and OAuth tokens before hitting 0600 disk files, auto-pruned on a rolling 30-day schedule.',
       show_kicker: 'LIVE WORKBENCH TOUR',
       show_title: 'Crafted as a quiet precision instrument.',
-      show_desc: 'Built with zero external frontend frameworks. Inspect real sanitized captures from PeaceClaude v0.2.0 below.',
+      show_desc: 'Built with zero external frontend frameworks. Click any tab below to inspect real sanitized captures from PeaceClaude v0.2.0.',
       faq_kicker: 'FREQUENTLY ASKED QUESTIONS',
       faq_title: 'Everything engineers ask before switching.',
       faq_q1: 'Will PeaceClaude slow down Slack, Lark, or normal browsing?',
@@ -90,8 +103,8 @@
       faq_a3: 'Desktop/CLI runs natively on macOS Universal (<code>arm64</code> + <code>x86_64</code>), Windows 10/11 (<code>amd64</code> + <code>arm64</code>), and Ubuntu/Debian Linux (<code>.deb</code> &amp; <code>tar.gz</code>). Native browser shielding works with Arc, Google Chrome, Brave, and Microsoft Edge.',
       faq_q4: 'How can I test the PeaceSwitch iOS app before setting up a server?',
       faq_a4: 'Launch PeaceSwitch on iPhone and tap "Launch Interactive Demo Mode" on the pairing screen. You can test profile switching, Pro/Max vs Free quota display, emergency fail-closed gate locks, and PAC toggles completely offline with zero server setup.',
-      faq_q5: 'How do I host this website on peace-claude.app while keeping my repo private?',
-      faq_a5: 'The <code>website/</code> folder has zero build dependencies. Deploy it directly via Vercel or Cloudflare Pages with Root Directory set to <code>website</code> and bind your <code>peace-claude.app</code> DNS records—your GitHub source repo can stay Private permanently. GitHub Pages workflow <code>.github/workflows/pages.yml</code> is also included.',
+      faq_q5: 'Can Claude Desktop open internal corporate SSO and intranet pages cleanly?',
+      faq_a5: 'Yes. PeaceClaude defaults to smart desktop PAC mode (<code>desktop_proxy_mode: "pac"</code>), routing Claude and telemetry through your static US node while keeping arbitrary intranet SSO pages, private CDNs, and private IPs <code>DIRECT</code>. You can customize routing rules anytime in the Network &amp; Policy console tab.',
       bnd_kicker: 'HONEST ENGINEERING',
       bnd_title: "Transparent about what Zero-VM covers — and doesn't.",
       bnd_1: '<strong>Network &amp; Fingerprint Guarantee:</strong> Fail-Closed static-IP routing, kernel <code>pf</code> IPv4/IPv6/UDP killswitch, isolated profile paths, host env scrubbing, and domain-scoped timezone/locale/CJK-font alignment.',
@@ -99,7 +112,7 @@
       bnd_3: '<strong>Native Browser Opt-In:</strong> Modern Chromium/Arc blocks silent unsigned extension injection; PeaceClaude generates the auditable MV3 folder locally and guides a 10-second developer-mode load.',
       ins_kicker: '4-PLATFORM RELEASES · v0.2.0',
       ins_title: 'Deploy everywhere your Claude workflow runs.',
-      ins_dl_btn: 'Download macOS DMG',
+      ins_dl_btn: 'Download',
       ins_copy: 'Copy Steps',
       ins_docs: 'All Releases',
       foot_note: 'Cross-Platform Zero-VM Static-IP Security Cockpit',
@@ -122,7 +135,7 @@
       cta_download_short: '快速上手',
       hero_eyebrow: 'macOS · Windows · Ubuntu · iOS PeaceSwitch · ~18 MB 零虚拟机',
       hero_title: '宿主机原生速度。<br/>确定性的静态 IP 安全边界。',
-      hero_lead: '无需背负 8 GB 虚拟机，告别裸代理泄漏与串号风险。PeaceClaude 现已覆盖 macOS、Windows 与 Ubuntu Linux 全端网关，并配备纯正 SwiftUI 原生 iOS 伴侣应用 PeaceSwitch，随时随地一键切号与紧急熔断。',
+      hero_lead: '用 ~18 MB 原生进程替代 6 GB 桌面虚拟机，彻底消除裸代理泄漏与串号风险。PeaceClaude 现已覆盖 macOS、Windows 与 Ubuntu Linux 全端网关，并配备 Pure SwiftUI 原生 iOS 应用 PeaceSwitch，随时随地一键切号与紧急熔断。',
       hero_cta_primary: '查看四端上手指南',
       copy_label: '复制',
       metric_ram: '网关内存占用',
@@ -138,45 +151,58 @@
       dk_kernel: '内核熔断防线',
       guide_kicker: '交互式四端上手指南',
       guide_title: '选择您的设备，2 分钟跑通静态 IP 隔离闭环。',
-      guide_desc: '点击下方任意系统标签，按 4 步即可完成网关安装、静态节点绑定、原生客户端防护与手机扫码配对。',
+      guide_desc: '点击下方任意系统标签，直接复制完整可运行脚本，按 4 步即可完成网关安装、静态节点绑定、原生客户端防护与手机扫码配对。',
       eco_kicker: 'PC · iOS · WEB 三端协同架构',
       eco_title: '同一套本地安全核心，三端状态实时同步。',
       eco_desc: '电脑前用命令行或 Web 工作台高效编码；起身离开电脑后，打开 iPhone 上的 PeaceSwitch 即可查看配额、切换账号或瞬间掐断出口门禁。',
       eco_pc_t: 'PC 桌面与命令行（macOS / Windows / Ubuntu）',
-      eco_pc_d: '单文件零依赖 Go 网关守护，支持 LaunchAgent / Windows 注册表 / Linux systemd --user 自启动、系统级域内 PAC 以及 macOS 物理网卡企业 VPN 旁路直连。',
+      eco_pc_d: '单文件零依赖 Go 网关守护，支持 LaunchAgent / Windows 注册表 / Linux systemd --user 自启动、桌面端智能 PAC 与 macOS 物理网卡 VPN 旁路直连（<code>IP_BOUND_IF</code>）。',
       eco_ios_t: 'PeaceSwitch 原生 iOS 应用（Pure SwiftUI）',
       eco_ios_d: '零 WebView 封装、零第三方追踪 SDK：支持 AVFoundation 扫码 120s 配对、系统 Keychain 存储令牌、震动反馈紧急熔断、多账号实时余量及无服务端互动演示模式。',
-      eco_web_t: '零依赖本机 Web 控制台（127.0.0.1:18899）',
-      eco_web_d: '内置于网关进程之中：提供 11 项全链路 Doctor 体检、外观工坊主题系统、403 三分诊定位与 Arc/Chrome MV3 扩展多选引导。',
+      eco_web_t: '零依赖本机 Web 控制台 (<code>:18899</code>)',
+      eco_web_d: '内置于本地守护进程：提供 11 项全链路安全体检、可视化域名路由策略配置、12 套外观工坊主题、403 三分诊定位与 Arc/Chrome MV3 扩展多选引导。',
       ios_mock_title: 'PeaceSwitch 工作台',
       ios_mock_ip_lbl: '已验证静态出口 IP',
       ios_mock_acc_lbl: '隔离多账号（点击体验切换）',
+      ios_acc_view_title: '全部隔离账号档案（点击切换）',
+      ios_acc_alpha_sub: '5h 已用 38% · 本周 54% · uuid-0a91',
+      ios_acc_beta_sub: '5h 已用 12% · 本周 29% · uuid-4f20',
       ios_mock_q1: '5h 已用 38% · 本周 54%',
       ios_mock_q2: '免费账号 · 无 5h / Weekly 配额',
       ios_mock_lock_btn: '触发紧急熔断',
       ios_mock_active: '当前使用',
       ios_mock_standby: '待命',
+      ios_sec_head: '11 项全链路安全体检',
+      ios_sec_sub: '零宿主机直连 · SOCKS5 远端解析',
+      ios_sec_pac: '桌面端路由模式',
+      ios_sec_pf: '内核 pf 防泄漏规则',
+      ios_sec_dns: 'WebRTC 与 QUIC 防护',
+      ios_sec_gate: 'Fail-Closed 熔断门禁',
       ios_tab_cockpit: '工作台',
       ios_tab_accounts: '多账号',
       ios_tab_security: '安全设置',
       cmp_kicker: '零虚拟机系统工程',
-      cmp_title: '为什么只为锁住 IP 与时区，就要拖着 8 GB 虚拟机？',
-      cmp_desc: 'PeaceClaude 在用户态与系统边界协同完成 Fail-Closed 熔断与全入口指纹对齐，保持设备静音、省电与原生流畅手感。',
+      cmp_title: '18 MB 原生进程，取代 6 GB 桌面虚拟机。',
+      cmp_desc: '无需虚拟硬件与笨重的 Linux 镜像，直接在宿主机用户态与内核防火墙边界完成确定性 Fail-Closed 熔断及域名指纹对齐，始终保持静音、省电与毫秒级响应。',
       b_ram_title: '常驻内存开销',
+      b_ram_delta: '内存省 340 倍',
       b_boot_title: '即开即用速度',
+      b_boot_delta: '快 150 倍',
       b_disk_title: '磁盘占用空间',
+      b_disk_delta: '体积小 1000 倍',
       b_vpn_title: '企业 VPN 共存兼容',
+      b_vpn_delta: '零路由冲突',
       lbl_vm: '传统 Linux 桌面虚拟机',
       lbl_tun: '全局 TUN / 桥接网卡',
       val_no_tun: '绝不开 TUN · 零冲突',
       val_conflict: '路由冲突断网',
       bento_kicker: '全入口统一架构',
-      bento_title: '六层精密安全防线，收口于一处工作台。',
+      bento_title: '六层精密安全防线，统一收口于一处工作台。',
       bento_desc: '从防泄漏网关到底层浏览器 MV3 扩展，每个客户端始终严格跟随当前激活档案。',
       f1_t: 'Fail-Closed 门禁 + 防直连护盾',
       f1_d: '四源并发探测静态出口，IP 漂移或手动锁屏秒返 503、主动掐断活跃长连接并拦截非代理直连泄漏。',
-      f2_t: '原生 Arc / Chrome 多选护航',
-      f2_d: '一键多选本机浏览器：叠加仅分流 Claude 的 PAC 与域名定向 MV3 扩展，达成 2/100 LOW RISK 且不扰动日常网页。',
+      f2_t: '桌面智能 PAC + 原生浏览器护航',
+      f2_d: '默认桌面端智能 PAC 分流 + 域名定向 MV3 扩展：支持 Arc / Chrome / Brave / Edge，使公司内网、SSO 与日常网页保持直连零干扰，同时严格锁定 Claude 出口。',
       f3_t: '多账号物理隔离与单活切号',
       f3_d: '独立配置、Desktop 目录与设备 UUID；自动区分 Free 与 Pro/Max 套餐，深度链接精准路由到活跃窗口。',
       f4_t: '11 项安全体检与 403 三分诊',
@@ -186,20 +212,20 @@
       f6_t: '30 天全脱敏可审计观测',
       f6_d: '请求抓包与 Split-IP 审计自动遮蔽 Authorization、Cookie 与 OAuth Code，以 0600 权限落盘滚动清理。',
       show_kicker: '实景界面画廊',
-      show_title: '精密仪器般克制的工作台体验。',
-      show_desc: '零外部前端构建依赖内嵌渲染，点击下方标签切换查看 PeaceClaude v0.2.0 真实脱敏截图。',
+      show_title: '零外部依赖的内嵌控制台，如精密仪表盘般克制直观。',
+      show_desc: '全部界面直接编译内嵌于本地网关，点击下方标签切换查看 PeaceClaude v0.2.0 真实脱敏截图。',
       faq_kicker: '常见问题与架构答疑',
-      faq_title: '迁移到零虚拟机前，工程师最关心的 5 个问题。',
+      faq_title: '迁移到零虚拟机架构前，工程师最关心的 5 个问题。',
       faq_q1: '开启后会不会导致飞书、Slack 或公司内网变慢？',
-      faq_a1: '完全不会。系统 PAC 与 MV3 护航扩展通过精确域名白名单仅匹配 <code>claude.ai</code>、<code>claude.com</code>、<code>anthropic.com</code>、<code>claudeusercontent.com</code> 与 <code>fuck-claude.app</code>。飞书、GitHub 与日常网页一律直连，且保留您本机原生时区与语言。',
-      faq_q2: '公司强制开着飞连等企业 VPN，还能稳用静态美国 IP 吗？',
-      faq_a2: '可以。PeaceClaude 绝不创建全局 TUN 虚拟网卡；在 macOS 上更支持物理网卡直连绑定（<code>IP_BOUND_IF</code>，如直出 <code>en0</code>），上游探测与静态节点请求直接绕开企业 VPN 路由干扰，日常办公与安全分流互不抢路。',
+      faq_a1: '完全不会。系统 PAC 与 MV3 护航扩展通过精确域名白名单仅匹配 <code>claude.ai</code>、<code>claude.com</code>、<code>anthropic.com</code>、<code>claudeusercontent.com</code> 与 <code>fuck-claude.app</code>。日常办公工具、内网系统与常规网页一律直连，且保留您本机原生时区与语言。',
+      faq_q2: '公司强制开启企业办公 VPN 时，还能稳用静态美国 IP 吗？',
+      faq_a2: '可以。PeaceClaude 绝不创建全局 TUN 虚拟网卡；在 macOS 上支持物理网卡直连绑定（<code>IP_BOUND_IF</code>，如直出 <code>en0</code>），静态节点与健康探测自动绕开企业 VPN 路由干扰，办公内网与 Claude 护航互不抢路。',
       faq_q3: '目前支持哪些桌面操作系统和浏览器？',
       faq_a3: '桌面服务端支持 macOS Universal（Apple Silicon + Intel）、Windows 10/11（amd64 + arm64）以及 Ubuntu / Debian Linux（提供 <code>.deb</code> 安装包与 systemd --user 自启服务）。原生浏览器护航兼容 Arc、Chrome、Brave 与 Microsoft Edge。',
       faq_q4: '没有配置桌面网关之前，iOS 端 PeaceSwitch 能否直接试用？',
       faq_a4: '可以。首次打开 PeaceSwitch 点击底部的「进入互动演示模式 / Launch Interactive Demo Mode」，即可在离线拟真沙盒中完整操作多账号切换、Free/Pro 配额查看、Fail-Closed 紧急锁网与 PAC 开关。',
-      faq_q5: '如何在保持主源码仓库 Private 私有的前提下部署独立官网（如 peace-claude.app）？',
-      faq_a5: '<code>website/</code> 目录为纯静态网页零构建步骤。推荐直接在 Vercel 或 Cloudflare Pages 导入仓库（Root Directory 填 <code>website</code>）并绑定 <code>peace-claude.app</code> 自定义域名，这样您的 GitHub 主代码仓可永久保持 Private 私有。仓内也已备妥 <code>.github/workflows/pages.yml</code> 与详细部署文档。',
+      faq_q5: 'Claude Desktop 内置浏览器能顺畅打开公司内网和 SSO 登录页吗？',
+      faq_a5: '可以。PeaceClaude 默认启用桌面端智能分流 PAC 模式（<code>desktop_proxy_mode: "pac"</code>），仅将 Claude 与遥测流量经静态节点转发，任意内网 SSO、私有 CDN 与私网 IP 均保持 <code>DIRECT</code> 直连，避免触发 Electron 内置浏览器的私网防探测拦截。所有域名路由策略均可在控制台「网络与策略」中实时定制。',
       bnd_kicker: '诚实工程边界',
       bnd_title: '明确零虚拟机能保什么，以及边界在哪里。',
       bnd_1: '<strong>网络与指纹层保障：</strong>Fail-Closed 静态 IP 路由、防火墙防直连、独立档案目录、宿主中转变量剥离，以及 Claude 域定向时区/语言/中文字体对齐。',
@@ -207,7 +233,7 @@
       bnd_3: '<strong>原生浏览器扩展机制：</strong>现代 Chromium/Arc 禁止静默植入未上架商店扩展；PeaceClaude 在本地生成可审计扩展源码并引导您 10 秒开启加载。',
       ins_kicker: '四端同步发布 · v0.2.0',
       ins_title: '覆盖您的每一台主力电脑与随身 iPhone。',
-      ins_dl_btn: '下载 macOS DMG',
+      ins_dl_btn: '下载',
       ins_copy: '复制步骤',
       ins_docs: '全部 Releases',
       foot_note: '跨平台零虚拟机静态 IP Claude 全入口安全套件',
@@ -223,42 +249,44 @@
   const GUIDE_DATA = {
     en: {
       macos: {
-        cmdLabel: 'macOS Quick Setup',
-        cmd: `chmod +x ./install.sh && ./install.sh
+        cmdLabel: 'macOS Direct One-Line Setup (Copy & Run)',
+        cmd: `curl -fsSL https://dragonforce2010.github.io/peaceclaude/install.sh | bash
 peaceclaude config set-upstream --mode direct-socks5 \\
   --addr <HOST>:<PORT> --user <USER> --pass <PASS> --expected-ip <STATIC_IP>
 peaceclaude browser-pac on && peaceclaude doctor --fix
 peaceclaude cli`,
         steps: [
-          { num: 'STEP 01', title: 'Install Universal Package', desc: 'Open DMG or run <code>./install.sh</code>. Installs <code>~/.local/bin/peaceclaude</code>, LaunchAgent autostart, and PeaceClaude.app.' },
+          { num: 'STEP 01', title: 'Run Direct Installer', desc: 'Paste the <code>curl ... | bash</code> command below (or mount the DMG). Installs <code>~/.local/bin/peaceclaude</code>, LaunchAgent autostart, and PeaceClaude.app.' },
           { num: 'STEP 02', title: 'Bind Static IP & Bypass VPN', desc: 'Set your SOCKS5/HTTP static residential IP. macOS automatically binds physical interface <code>en0</code> to bypass corporate VPN clashes.' },
-          { num: 'STEP 03', title: 'Launch Guarded Surfaces', desc: 'Run <code>peaceclaude cli</code>, launch isolated Desktop, or toggle PAC + MV3 Shield for Arc/Chrome (achieves 2/100 LOW RISK).' },
+          { num: 'STEP 03', title: 'Launch Guarded Surfaces', desc: 'Run <code>peaceclaude cli</code>, launch isolated Desktop (smart PAC mode), or toggle MV3 Shield for Arc/Chrome (achieves 2/100 LOW RISK).' },
           { num: 'STEP 04', title: 'Pair PeaceSwitch on iPhone', desc: 'Open Console -> Remote Pairing for a 120s QR ticket. Scan via PeaceSwitch on iPhone over LAN or Tailscale.' },
         ],
       },
       windows: {
-        cmdLabel: 'Windows PowerShell Setup',
-        cmd: `Expand-Archive PeaceClaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
+        cmdLabel: 'Windows PowerShell Direct Setup (Copy & Run)',
+        cmd: `Invoke-WebRequest -Uri "https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-windows-amd64.zip" -OutFile "$env:TEMP\\peaceclaude.zip"
+Expand-Archive "$env:TEMP\\peaceclaude.zip" -DestinationPath "$HOME\\peaceclaude" -Force
 $env:Path += ";$HOME\\peaceclaude\\peaceclaude-v0.2.0-windows-amd64"
 peaceclaude.exe service install
 peaceclaude.exe config set-upstream --mode direct-socks5 --addr <HOST>:<PORT> --expected-ip <STATIC_IP>
 peaceclaude.exe status --check`,
         steps: [
-          { num: 'STEP 01', title: 'Extract Release Zip', desc: 'Download <code>PeaceClaude-v0.2.0-windows-amd64.zip</code> (or <code>arm64</code>) and add the extracted folder to your PATH.' },
+          { num: 'STEP 01', title: 'Fetch & Extract Release Zip', desc: 'Downloads <code>PeaceClaude-v0.2.0-windows-amd64.zip</code> cleanly to temp, extracts to <code>$HOME\\peaceclaude</code>, and adds it to PATH.' },
           { num: 'STEP 02', title: 'Register HKCU Run Autostart', desc: 'Run <code>peaceclaude.exe service install</code> to write the HKCU Run entry cleanly without UAC admin elevation.' },
           { num: 'STEP 03', title: 'Configure System Scoped PAC', desc: 'Toggle Browser PAC in console or CLI: updates Windows <code>Internet Settings\\AutoConfigURL</code> strictly for Claude domains.' },
           { num: 'STEP 04', title: 'Verify Gate & Run CLI / App', desc: 'Confirm <code>OPEN</code> static IP with <code>peaceclaude.exe status --check</code>, then launch isolated Claude CLI or Desktop.' },
         ],
       },
       ubuntu: {
-        cmdLabel: 'Ubuntu / Debian (.deb + systemd --user)',
-        cmd: `sudo dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb
+        cmdLabel: 'Ubuntu / Debian Direct Setup (Copy & Run)',
+        cmd: `curl -fSL "https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-ubuntu-$(dpkg --print-architecture).deb" -o /tmp/peaceclaude.deb
+sudo apt-get install -y /tmp/peaceclaude.deb && rm -f /tmp/peaceclaude.deb
 peaceclaude service install
 peaceclaude config set-upstream --mode direct-socks5 \\
   --addr <HOST>:<PORT> --user <USER> --pass <PASS> --expected-ip <STATIC_IP>
 peaceclaude cli --profile work`,
         steps: [
-          { num: 'STEP 01', title: 'Install Debian Package', desc: 'Install <code>PeaceClaude-v0.2.0-ubuntu-amd64.deb</code> (or extract Linux <code>.tar.gz</code>). Installs to <code>/usr/bin/peaceclaude</code>.' },
+          { num: 'STEP 01', title: 'Download & Install .deb', desc: 'Auto-detects <code>amd64</code> / <code>arm64</code> via <code>dpkg --print-architecture</code> and installs <code>/usr/bin/peaceclaude</code>.' },
           { num: 'STEP 02', title: 'Enable systemd --user Unit', desc: 'Run <code>peaceclaude service install</code> to enable and start <code>~/.config/systemd/user/peaceclaude.service</code>.' },
           { num: 'STEP 03', title: 'GNOME PAC & MV3 Shield', desc: 'Desktop environments apply <code>gsettings org.gnome.system.proxy autoconfig-url</code> automatically alongside Chromium MV3.' },
           { num: 'STEP 04', title: 'Open Web Workbench', desc: 'Visit <code>http://127.0.0.1:18899</code> in your Linux browser to inspect 11-point Doctor scores and pair your phone.' },
@@ -279,42 +307,44 @@ peaceclaude remote enable --mode lan
     },
     zh: {
       macos: {
-        cmdLabel: 'macOS 一键安装与启动命令',
-        cmd: `chmod +x ./install.sh && ./install.sh
+        cmdLabel: 'macOS 一键复制直装与启动命令（无需提前下载）',
+        cmd: `curl -fsSL https://dragonforce2010.github.io/peaceclaude/install.sh | bash
 peaceclaude config set-upstream --mode direct-socks5 \\
   --addr <HOST>:<PORT> --user <USER> --pass <PASS> --expected-ip <STATIC_IP>
 peaceclaude browser-pac on && peaceclaude doctor --fix
 peaceclaude cli`,
         steps: [
-          { num: 'STEP 01', title: '安装 Universal 双架构套件', desc: '挂载 DMG 或执行 <code>./install.sh</code>，自动部署 <code>peaceclaude</code> CLI、开机 LaunchAgent 守护进程与原生工作台应用。' },
-          { num: 'STEP 02', title: '绑定静态 IP 并绕过企业 VPN', desc: '填入你的静态住宅 SOCKS5/HTTP 出口。macOS 自动绑定物理网卡 <code>en0</code>（<code>IP_BOUND_IF</code>）避开飞连等 VPN 抢路。' },
-          { num: 'STEP 03', title: '启动全入口护航', desc: '直接运行 <code>peaceclaude cli</code>、隔离 Desktop，或在工作台多选 Arc/Chrome 加载仅护航 Claude 的 MV3 扩展。' },
+          { num: 'STEP 01', title: '一条命令直装 Universal 套件', desc: '直接复制下方 <code>curl ... | bash</code> 运行（或挂载 DMG），自动部署 <code>peaceclaude</code> CLI、LaunchAgent 自启守护与原生工作台应用。' },
+          { num: 'STEP 02', title: '绑定静态 IP 并绕过企业 VPN', desc: '填入你的静态住宅 SOCKS5/HTTP 出口。macOS 自动绑定物理网卡 <code>en0</code>（<code>IP_BOUND_IF</code>）避开企业办公 VPN 抢路。' },
+          { num: 'STEP 03', title: '启动全入口护航', desc: '直接运行 <code>peaceclaude cli</code>、隔离 Desktop（内置智能 PAC），或在工作台多选 Arc/Chrome 加载仅护航 Claude 的 MV3 扩展。' },
           { num: 'STEP 04', title: '连接 PeaceSwitch 手机端', desc: '打开工作台「远程配对」签发 120 秒一次性二维码，用 iPhone PeaceSwitch 扫码接入。' },
         ],
       },
       windows: {
-        cmdLabel: 'Windows PowerShell 快速部署',
-        cmd: `Expand-Archive PeaceClaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
+        cmdLabel: 'Windows PowerShell 一键复制部署命令',
+        cmd: `Invoke-WebRequest -Uri "https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-windows-amd64.zip" -OutFile "$env:TEMP\\peaceclaude.zip"
+Expand-Archive "$env:TEMP\\peaceclaude.zip" -DestinationPath "$HOME\\peaceclaude" -Force
 $env:Path += ";$HOME\\peaceclaude\\peaceclaude-v0.2.0-windows-amd64"
 peaceclaude.exe service install
 peaceclaude.exe config set-upstream --mode direct-socks5 --addr <HOST>:<PORT> --expected-ip <STATIC_IP>
 peaceclaude.exe status --check`,
         steps: [
-          { num: 'STEP 01', title: '解压 Windows 绿色发行包', desc: '下载 <code>PeaceClaude-v0.2.0-windows-amd64.zip</code>（或 <code>arm64</code>）解压并将内层目录加入 PATH。' },
+          { num: 'STEP 01', title: '拉取并解压 Windows 发行包', desc: '自动下载 <code>PeaceClaude-v0.2.0-windows-amd64.zip</code> 到临时目录并解压至 <code>$HOME\\peaceclaude</code>，随即加入当前会话 PATH。' },
           { num: 'STEP 02', title: '免管理员权限开机自启动', desc: '运行 <code>peaceclaude.exe service install</code> 自动写入当前用户注册表 <code>HKCU\\...\\Run</code> 静默自启项。' },
           { num: 'STEP 03', title: '自动切换域内系统 PAC', desc: '开启 PAC 护航后自动写入 Windows <code>Internet Settings\\AutoConfigURL</code>，严格只接管 Claude 相关域名。' },
           { num: 'STEP 04', title: '门禁复检并启动 CLI / 桌面端', desc: '运行 <code>peaceclaude.exe status --check</code> 确认显示 <code>OPEN</code> 后，打开隔离版 CLI 或浏览器工作台。' },
         ],
       },
       ubuntu: {
-        cmdLabel: 'Ubuntu / Debian (.deb 与 systemd --user)',
-        cmd: `sudo dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb
+        cmdLabel: 'Ubuntu / Debian 一键复制安装命令',
+        cmd: `curl -fSL "https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-ubuntu-$(dpkg --print-architecture).deb" -o /tmp/peaceclaude.deb
+sudo apt-get install -y /tmp/peaceclaude.deb && rm -f /tmp/peaceclaude.deb
 peaceclaude service install
 peaceclaude config set-upstream --mode direct-socks5 \\
   --addr <HOST>:<PORT> --user <USER> --pass <PASS> --expected-ip <STATIC_IP>
 peaceclaude cli --profile work`,
         steps: [
-          { num: 'STEP 01', title: '安装 .deb 安装包', desc: '执行 <code>dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb</code>（或解压 <code>.tar.gz</code>），自动安装至 <code>/usr/bin/peaceclaude</code>。' },
+          { num: 'STEP 01', title: '自动识别架构并安装 .deb', desc: '通过 <code>dpkg --print-architecture</code> 自动拉取 <code>amd64</code> / <code>arm64</code> 安装包并部署至 <code>/usr/bin/peaceclaude</code>。' },
           { num: 'STEP 02', title: '注册 systemd --user 常驻服务', desc: '执行 <code>peaceclaude service install</code> 自动配置并启动 <code>~/.config/systemd/user/peaceclaude.service</code>。' },
           { num: 'STEP 03', title: 'GNOME PAC 与 Chrome 扩展协同', desc: '通过 <code>gsettings</code> 自动下发系统 PAC 地址，并结合 Chrome/Brave 开发者扩展完成域内指纹护盾。' },
           { num: 'STEP 04', title: '浏览器打开本地控制台', desc: '访问 <code>http://127.0.0.1:18899</code> 查看 11 项体检分数并向 PeaceSwitch iPhone 端配对。' },
@@ -341,23 +371,22 @@ peaceclaude remote enable --mode lan
   let installMode = 'macos';
   let iosLocked = false;
   let iosActiveAccount = 'alpha';
+  let iosActiveTab = 'cockpit';
   let curShotTab = document.querySelector('.sc-tab.active');
 
   const INSTALL_SNIPPETS = {
-    macos: `# macOS Universal (Apple Silicon + Intel)
-tar -xzf peaceclaude-v0.2.0-macos-universal.tar.gz
-cd peaceclaude-v0.2.0-macos-universal
-./install.sh
+    macos: `# macOS Universal (Apple Silicon + Intel) — Run directly
+curl -fsSL https://dragonforce2010.github.io/peaceclaude/install.sh | bash
 peaceclaude status --check`,
-    windows: `# Windows 10 / 11 (amd64 / arm64) PowerShell
-Expand-Archive PeaceClaude-v0.2.0-windows-amd64.zip -DestinationPath $HOME\\peaceclaude
+    windows: `# Windows 10 / 11 (amd64) PowerShell — Run directly
+Invoke-WebRequest -Uri "https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-windows-amd64.zip" -OutFile "$env:TEMP\\peaceclaude.zip"
+Expand-Archive "$env:TEMP\\peaceclaude.zip" -DestinationPath "$HOME\\peaceclaude" -Force
 $env:Path += ";$HOME\\peaceclaude\\peaceclaude-v0.2.0-windows-amd64"
-peaceclaude.exe service install
-peaceclaude.exe status --check`,
-    ubuntu: `# Ubuntu / Debian Linux (amd64 / arm64)
-sudo dpkg -i PeaceClaude-v0.2.0-ubuntu-amd64.deb
-peaceclaude service install
-peaceclaude status --check`,
+peaceclaude.exe service install && peaceclaude.exe status --check`,
+    ubuntu: `# Ubuntu / Debian (auto amd64 / arm64) — Run directly
+curl -fSL "https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-ubuntu-$(dpkg --print-architecture).deb" -o /tmp/peaceclaude.deb
+sudo apt-get install -y /tmp/peaceclaude.deb && rm -f /tmp/peaceclaude.deb
+peaceclaude service install && peaceclaude status --check`,
     ios: `# iOS Companion App (PeaceSwitch · Pure SwiftUI)
 git clone https://github.com/dragonforce2010/peaceclaude.git
 cd peaceclaude/ios/PeaceSwitch
@@ -367,23 +396,27 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
   const RELEASE_DOWNLOADS = {
     macos: {
       url: 'https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-macos-universal.dmg',
-      en: 'Download macOS DMG',
-      zh: '下载 macOS DMG',
+      title: 'PeaceClaude-v0.2.0-macos-universal.dmg',
+      en: 'Download',
+      zh: '下载',
     },
     windows: {
       url: 'https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-windows-amd64.zip',
-      en: 'Download Windows ZIP',
-      zh: '下载 Windows ZIP',
+      title: 'PeaceClaude-v0.2.0-windows-amd64.zip',
+      en: 'Download',
+      zh: '下载',
     },
     ubuntu: {
       url: 'https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-ubuntu-amd64.deb',
-      en: 'Download Ubuntu .deb',
-      zh: '下载 Ubuntu .deb',
+      title: 'PeaceClaude-v0.2.0-ubuntu-amd64.deb',
+      en: 'Download',
+      zh: '下载',
     },
     ios: {
       url: 'https://github.com/dragonforce2010/peaceclaude/blob/main/ios/APP_STORE_GUIDE.md',
-      en: 'iOS Build & App Store Guide',
-      zh: '查看 iOS 构建与上架指南',
+      title: 'PeaceSwitch iOS Build & App Store Guide',
+      en: 'iOS Guide',
+      zh: 'iOS 指南',
     },
   };
 
@@ -392,6 +425,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     if (!dl) return;
     const item = RELEASE_DOWNLOADS[installMode] || RELEASE_DOWNLOADS.macos;
     dl.href = item.url;
+    dl.title = item.title;
     dl.textContent = curLang === 'zh' ? item.zh : item.en;
   }
 
@@ -416,7 +450,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
       $('dv-locale').textContent = switchSafe ? 'en-US · Canvas 中文字体护盾已启' : 'zh-CN · 暴露简体中文字体列表';
       $('dv-kernel').textContent = switchSafe ? '503 硬拦截 + 防直连护盾激活' : '无 Fail-Closed · IPv6/UDP 可直连';
       $('sc-cli-note').textContent = switchSafe ? 'TZ 对齐 + 剥离宿主变量' : '沿用 Asia/Shanghai';
-      $('sc-desktop-note').textContent = switchSafe ? 'Auto-Peace + 禁 QUIC' : '暴露系统 locale / UDP';
+      $('sc-desktop-note').textContent = switchSafe ? '智能 PAC + 禁 QUIC' : '暴露系统 locale / UDP';
       $('sc-browser-note').textContent = switchSafe ? 'PAC + 定向 MV3 扩展' : '漏出国区时区与语言';
     } else {
       $('switch-state-text').textContent = switchSafe ? 'GUARDED' : 'EXPOSED';
@@ -428,7 +462,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
       $('dv-locale').textContent = switchSafe ? 'en-US · Canvas CJK Scrubber ON' : 'zh-CN · Chinese Font List Exposed';
       $('dv-kernel').textContent = switchSafe ? 'HTTP 503 Guard + Kernel Anchor Armed' : 'No Fail-Closed · Raw IPv6/UDP Open';
       $('sc-cli-note').textContent = switchSafe ? 'TZ + Env Stripped' : 'Host TZ Exposed';
-      $('sc-desktop-note').textContent = switchSafe ? 'Auto-Peace & QUIC Off' : 'Host Locale / QUIC';
+      $('sc-desktop-note').textContent = switchSafe ? 'Smart PAC & QUIC Off' : 'Host Locale / QUIC';
       $('sc-browser-note').textContent = switchSafe ? 'PAC + MV3 Shield' : 'Direct / Fingerprint Leak';
     }
   }
@@ -455,15 +489,30 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     const pill = $('ios-gate-pill');
     const meta = $('ios-egress-meta');
     const lockBtn = $('btn-ios-lock');
+    const pacVal = $('ios-sec-pac-val');
+    const pfVal = $('ios-sec-pf-val');
+    const dnsVal = $('ios-sec-dns-val');
+    const gateVal = $('ios-sec-gate-val');
+    const secScore = $('ios-sec-score');
+
     if (curLang === 'zh') {
       if (pill) pill.textContent = iosLocked ? '已熔断' : '已放行';
       if (meta) meta.textContent = iosLocked ? 'Fail-Closed 硬截断 · 等待解锁' : 'Cheyenne, US · en0 物理直连 · 84 ms';
       if (lockBtn) lockBtn.textContent = iosLocked ? '恢复静默放行' : '触发紧急熔断';
+      if (pacVal) pacVal.textContent = 'PAC 智能分流';
+      if (pfVal) pfVal.textContent = '已启用 (pf)';
+      if (dnsVal) dnsVal.textContent = '已锁定';
+      if (gateVal) gateVal.textContent = iosLocked ? '已熔断 (503)' : '已放行';
     } else {
       if (pill) pill.textContent = iosLocked ? 'LOCKED' : 'OPEN';
       if (meta) meta.textContent = iosLocked ? 'Fail-Closed Armed · Traffic Halted' : 'Cheyenne, US · en0 Bypass · 84 ms';
       if (lockBtn) lockBtn.textContent = iosLocked ? 'Unlock Egress Gate' : 'Trigger Emergency Lock';
+      if (pacVal) pacVal.textContent = 'PAC DIRECT';
+      if (pfVal) pfVal.textContent = 'ARMED';
+      if (dnsVal) dnsVal.textContent = 'LOCKED';
+      if (gateVal) gateVal.textContent = iosLocked ? 'LOCKED (503)' : 'OPEN';
     }
+    if (secScore) secScore.textContent = '100';
 
     document.querySelectorAll('.ios-acc-row').forEach((row) => {
       const isAct = row.dataset.iosAcc === iosActiveAccount;
@@ -476,6 +525,54 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
           : (isAct ? 'ACTIVE' : 'STANDBY');
       }
     });
+
+    const viewMap = {
+      cockpit: $('ios-view-cockpit'),
+      accounts: $('ios-view-accounts'),
+      security: $('ios-view-security'),
+    };
+    Object.entries(viewMap).forEach(([key, el]) => {
+      if (el) el.classList.toggle('hidden', key !== iosActiveTab);
+    });
+    document.querySelectorAll('.ios-tab-btn').forEach((btn) => {
+      const active = btn.dataset.iosTab === iosActiveTab;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
+    });
+  }
+
+  function updateShowcaseMeta(btn) {
+    if (!btn) return;
+    const caption = curLang === 'zh' ? btn.dataset.captionZh : btn.dataset.captionEn;
+    const winTitle = curLang === 'zh' ? btn.dataset.titleZh : btn.dataset.titleEn;
+    if ($('showcase-caption') && caption) $('showcase-caption').textContent = caption;
+    if ($('showcase-win-title') && winTitle) $('showcase-win-title').textContent = winTitle;
+  }
+
+  function selectShowcaseTab(btn) {
+    if (!btn) return;
+    document.querySelectorAll('.sc-tab').forEach((b) => {
+      b.classList.remove('active');
+      b.setAttribute('aria-selected', 'false');
+    });
+    btn.classList.add('active');
+    btn.setAttribute('aria-selected', 'true');
+    curShotTab = btn;
+    updateShowcaseMeta(btn);
+
+    const img = $('showcase-img');
+    const shot = btn.dataset.shot;
+    if (!img || !shot) return;
+    const nextSrc = 'assets/' + shot;
+    if (!img.getAttribute('src')?.endsWith(shot)) {
+      img.classList.add('is-loading');
+      img.onload = () => img.classList.remove('is-loading');
+      img.onerror = () => img.classList.remove('is-loading');
+      img.src = nextSrc;
+      img.alt = btn.textContent?.trim() || 'PeaceClaude Workbench Screenshot';
+      if (img.complete) img.classList.remove('is-loading');
+    }
+    announce(btn.textContent?.trim() || '');
   }
 
   function applyLang(lang) {
@@ -487,9 +584,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
       if (dict[k]) el.innerHTML = dict[k];
     });
     if ($('lang-label')) $('lang-label').textContent = curLang === 'zh' ? 'EN' : '中文';
-    if (curShotTab) {
-      $('showcase-caption').textContent = curLang === 'zh' ? curShotTab.dataset.captionZh : curShotTab.dataset.captionEn;
-    }
+    if (curShotTab) updateShowcaseMeta(curShotTab);
     renderTelemetryDeck();
     renderGuide();
     renderIOSMockup();
@@ -545,6 +640,14 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     });
   });
 
+  document.querySelectorAll('.ios-tab-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      iosActiveTab = btn.dataset.iosTab || 'cockpit';
+      renderIOSMockup();
+      announce(btn.textContent?.trim() || '');
+    });
+  });
+
   $('btn-lang-toggle')?.addEventListener('click', () => {
     applyLang(curLang === 'en' ? 'zh' : 'en');
   });
@@ -554,18 +657,17 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     applyTheme(cur === 'light' ? 'dark' : 'light');
   });
 
-  $('showcase-tabs')?.addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.sc-tab');
-    if (!btn) return;
-    document.querySelectorAll('.sc-tab').forEach((b) => {
-      b.classList.remove('active');
-      b.setAttribute('aria-selected', 'false');
+  const showcaseTabs = Array.from(document.querySelectorAll('.sc-tab'));
+  showcaseTabs.forEach((btn, idx) => {
+    btn.addEventListener('click', () => selectShowcaseTab(btn));
+    btn.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'ArrowRight' && ev.key !== 'ArrowLeft') return;
+      ev.preventDefault();
+      const nextIdx = (idx + (ev.key === 'ArrowRight' ? 1 : -1) + showcaseTabs.length) % showcaseTabs.length;
+      const target = showcaseTabs[nextIdx];
+      target.focus();
+      selectShowcaseTab(target);
     });
-    btn.classList.add('active');
-    btn.setAttribute('aria-selected', 'true');
-    curShotTab = btn;
-    $('showcase-img').src = 'assets/' + btn.dataset.shot;
-    $('showcase-caption').textContent = curLang === 'zh' ? btn.dataset.captionZh : btn.dataset.captionEn;
   });
 
   $('install-tabs')?.addEventListener('click', (ev) => {
@@ -583,7 +685,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
   });
 
   $('btn-hero-copy')?.addEventListener('click', async () => {
-    const cmd = ($('hero-copy-cmd')?.textContent || './install.sh').trim();
+    const cmd = ($('hero-copy-cmd')?.textContent || 'curl -fsSL https://dragonforce2010.github.io/peaceclaude/install.sh | bash').trim();
     try { await navigator.clipboard.writeText(cmd); } catch {}
     announce(curLang === 'zh' ? '安装命令已复制到剪贴板' : 'Install command copied to clipboard');
     const tag = $('hero-copy-tag');
@@ -614,6 +716,16 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     }
   });
 
+  // Preload all showcase screenshots in the background for instant tab switching
+  function preloadShowcaseImages() {
+    showcaseTabs.forEach((btn) => {
+      const shot = btn.dataset.shot;
+      if (!shot) return;
+      const pre = new Image();
+      pre.src = 'assets/' + shot;
+    });
+  }
+
   // Boot
   let savedTheme = 'light';
   let savedLang = 'en';
@@ -623,4 +735,5 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
   } catch {}
   applyTheme(savedTheme);
   applyLang(savedLang);
+  preloadShowcaseImages();
 })();

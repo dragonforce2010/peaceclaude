@@ -166,11 +166,13 @@ code, pre, .mono {
   white-space: nowrap;
   flex-shrink: 0;
   border-radius: 10px;
+  font: inherit;
+  font-size: 14px;
   font-weight: 500;
+  padding: 10px 18px;
   text-decoration: none;
   cursor: pointer;
   border: 1px solid transparent;
-  font: inherit;
   transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, filter 140ms ease;
 }
 .btn:active { transform: translateY(1px); }
@@ -187,6 +189,8 @@ code, pre, .mono {
 .btn-secondary:hover { border-color: var(--accent); }
 .btn-ghost { background: transparent; color: var(--text-sec); border-color: var(--border); padding: 9px 16px; font-size: 14px; }
 .btn-ghost:hover { color: var(--text); border-color: var(--border-strong); }
+#btn-hero-copy { max-width: 100%; overflow: hidden; }
+#hero-copy-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
 
 .pill-btn {
   height: 33px;
@@ -543,6 +547,11 @@ code, pre, .mono {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.sc-tab:hover {
+  border-color: var(--accent);
+  color: var(--text);
 }
 .sc-tab.active {
   background: var(--accent);
@@ -575,6 +584,10 @@ code, pre, .mono {
   width: 100%;
   display: block;
   height: auto;
+  transition: opacity 160ms ease;
+}
+.showcase-img.is-loading {
+  opacity: 0.55;
 }
 .showcase-caption {
   margin: 12px 4px 0;
@@ -959,18 +972,98 @@ code, pre, .mono {
   background: var(--surface-sub);
   color: var(--muted);
 }
+.ios-body {
+  min-height: 298px;
+  display: flex;
+  flex-direction: column;
+}
+.ios-view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ios-view.hidden {
+  display: none;
+}
+.ios-sec-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.ios-sec-card strong {
+  display: block;
+  font-size: 13px;
+}
+.ios-sec-card small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ios-sec-score {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0D9488;
+}
+.ios-sec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ios-sec-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11.5px;
+}
+.ios-sec-row span {
+  color: var(--text-sec);
+}
+.ios-sec-row code {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #0D9488;
+}
+.iphone-chassis[data-locked="true"] .ios-sec-row[data-sec-gate="true"] code {
+  color: #DC2626;
+}
 .ios-tabbar {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
   text-align: center;
   border-top: 1px solid var(--border);
-  padding-top: 9px;
+  margin-top: auto;
+  padding-top: 7px;
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
 }
-.ios-tabbar span.active {
+.ios-tab-btn {
+  background: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 4px;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.ios-tab-btn:hover {
+  background: var(--surface-sub);
+  color: var(--text);
+}
+.ios-tab-btn.active {
   color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* FAQ Accordion */
