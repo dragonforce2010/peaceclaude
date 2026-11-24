@@ -112,3 +112,56 @@ HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Internet Settings
 		t.Fatal("access denied must NOT be treated as not-found")
 	}
 }
+
+func TestDesktopCmdlineHasPeaceProxyAcceptsServerAndPAC(t *testing.T) {
+	cfg := config.Default()
+	cfg.Listen.BindAddr = "127.0.0.1"
+	cfg.Listen.HTTPPort = 18897
+	cfg.Listen.ControlPort = 18899
+
+	cases := []struct {
+		name    string
+		cmdline string
+		want    bool
+	}{
+		{
+			name:    "proxy-server mode",
+			cmdline: "/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/tmp/d --proxy-server=http://127.0.0.1:18897 --disable-quic",
+			want:    true,
+		},
+		{
+			name:    "pac desktop mode",
+			cmdline: "/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/tmp/d --proxy-pac-url=http://127.0.0.1:18899/peaceclaude.pac?mode=desktop --disable-quic",
+			want:    true,
+		},
+		{
+			name:    "pac base mode",
+			cmdline: "/Applications/Claude.app/Contents/MacOS/Claude --user-data-dir=/tmp/d --proxy-pac-url=http://127.0.0.1:18899/peaceclaude.pac --disable-quic",
+			want:    true,
+		},
+		{
+			name:    "wrong pac host suffix spoofing",
+			cmdline: "/Applications/Claude.app/Contents/MacOS/Claude --proxy-pac-url=http://127.0.0.1:18899/peaceclaude.pac.evil.com",
+			want:    false,
+		},
+		{
+			name:    "wrong proxy port",
+			cmdline: "/Applications/Claude.app/Contents/MacOS/Claude --proxy-server=http://127.0.0.1:7897",
+			want:    false,
+		},
+		{
+			name:    "exposed no proxy flags",
+			cmdline: "/Applications/Claude.app/Contents/MacOS/Claude --lang=en-US",
+			want:    false,
+		},
+	}
+
+	for _, tc := range cases {
+		if got := desktopCmdlineHasPeaceProxy(tc.cmdline, cfg); got != tc.want {
+			t.Errorf("%s: desktopCmdlineHasPeaceProxy = %v, want %v (cmd=%q)", tc.name, got, tc.want, tc.cmdline)
+		}
+	}
+	if desktopCmdlineHasPeaceProxy("--proxy-server=http://127.0.0.1:18897", nil) {
+		t.Fatal("nil config must return false")
+	}
+}

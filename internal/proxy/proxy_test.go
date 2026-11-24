@@ -691,3 +691,51 @@ func TestSecurityAndRoutingRegressions(t *testing.T) {
 		t.Fatalf("expected 503 after post-dial gate lock TOCTOU check, got HTTP %d", resp.StatusCode)
 	}
 }
+
+func TestRenderPACDesktopModeRoutesClaudeTelemetryBlockedAndDirectIntranet(t *testing.T) {
+	cfg := config.Default()
+	cfg.Listen.BindAddr = "127.0.0.1"
+	cfg.Listen.HTTPPort = 18897
+	cfg.Listen.SOCKS5Port = 18898
+	cfg.Shield.TelemetryShield = true
+	cfg.Shield.ExtraClaudeDomains = []string{"custom-claude.example"}
+	cfg.Shield.ExtraBlockedDomains = []string{"tracker.example"}
+
+	desktopPAC := RenderPAC(cfg, "desktop")
+	if !strings.Contains(desktopPAC, "PeaceClaude PAC (mode=desktop)") {
+		t.Fatalf("expected mode=desktop header in PAC:\n%s", desktopPAC)
+	}
+	for _, wantDomain := range []string{
+		"claude.ai",
+		"api.anthropic.com",
+		"anthropic.com",
+		"custom-claude.example",
+		"sentry.io",
+		"statsigapi.net",
+		"tracker.example",
+	} {
+		clean := wantDomain
+		if strings.Contains(wantDomain, "api.anthropic.com") {
+			clean = "anthropic.com"
+		}
+		if !strings.Contains(desktopPAC, `"`+clean+`"`) {
+			t.Fatalf("desktop PAC missing domain %q:\n%s", clean, desktopPAC)
+		}
+	}
+
+	// Standard host-browser mode ("claude") must keep third-party sentry.io DIRECT.
+	claudePAC := RenderPAC(cfg, "claude")
+	if !strings.Contains(claudePAC, "PeaceClaude PAC (mode=claude)") {
+		t.Fatalf("expected mode=claude header in PAC:\n%s", claudePAC)
+	}
+	if strings.Contains(claudePAC, `"sentry.io"`) || strings.Contains(claudePAC, `"tracker.example"`) {
+		t.Fatalf("claude PAC unexpectedly routed sentry.io or extra_blocked_domains through proxy:\n%s", claudePAC)
+	}
+	if !strings.Contains(claudePAC, `"custom-claude.example"`) {
+		t.Fatalf("claude PAC missing extra_claude_domains entry:\n%s", claudePAC)
+	}
+	// Unknown intranet / private domains must not appear in either PAC so FindProxyForURL returns DIRECT.
+	if strings.Contains(desktopPAC, "unknown-corp.internal") {
+		t.Fatalf("desktop PAC should not hardcode arbitrary intranet domains:\n%s", desktopPAC)
+	}
+}

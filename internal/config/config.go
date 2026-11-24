@@ -95,6 +95,7 @@ type ShieldConfig struct {
 	BlockPrivateTargets  bool     `json:"block_private_targets"`
 	AllowCorporateDirect bool     `json:"allow_corporate_direct"`
 	ProxyAuthDomains     bool     `json:"proxy_auth_domains"`
+	DesktopProxyMode     string   `json:"desktop_proxy_mode,omitempty"`
 	ProtectedBrowsers    []string `json:"protected_browsers,omitempty"`
 	CorporateDomains     []string `json:"corporate_domains,omitempty"`
 	ExtraBlockedDomains  []string `json:"extra_blocked_domains,omitempty"`
@@ -395,6 +396,7 @@ func Default() *Config {
 			TelemetryShield:      true,
 			BlockPrivateTargets:  false,
 			AllowCorporateDirect: true,
+			DesktopProxyMode:     "pac",
 			CorporateDomains:     []string{},
 			ExtraBlockedDomains:  []string{},
 			ExtraClaudeDomains:   []string{},
@@ -506,6 +508,10 @@ func (c *Config) Normalize() {
 	if c.Remote.MobilePort < 1024 || c.Remote.MobilePort > 65535 {
 		c.Remote.MobilePort = def.Remote.MobilePort
 	}
+	c.Shield.DesktopProxyMode = strings.ToLower(strings.TrimSpace(c.Shield.DesktopProxyMode))
+	if c.Shield.DesktopProxyMode == "" {
+		c.Shield.DesktopProxyMode = "pac"
+	}
 }
 
 func (c *Config) Validate() error {
@@ -513,6 +519,11 @@ func (c *Config) Validate() error {
 	case "local-proxy", "direct-socks5", "direct-http":
 	default:
 		return fmt.Errorf("unsupported upstream.mode %q (want local-proxy|direct-socks5|direct-http)", c.Upstream.Mode)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Shield.DesktopProxyMode)) {
+	case "", "pac", "proxy":
+	default:
+		return fmt.Errorf("unsupported shield.desktop_proxy_mode %q (want pac|proxy)", c.Shield.DesktopProxyMode)
 	}
 	if strings.TrimSpace(c.Upstream.Address) == "" {
 		return errors.New("upstream.address must not be empty")
@@ -554,6 +565,17 @@ func (c *Config) HTTPProxyURL() string {
 
 func (c *Config) SOCKS5ProxyURL() string {
 	return fmt.Sprintf("socks5h://%s", c.SOCKS5ProxyAddr())
+}
+
+func (c *Config) EffectiveDesktopProxyMode() string {
+	if c != nil && strings.EqualFold(strings.TrimSpace(c.Shield.DesktopProxyMode), "proxy") {
+		return "proxy"
+	}
+	return "pac"
+}
+
+func (c *Config) DesktopPACURL() string {
+	return c.ControlURL() + "/peaceclaude.pac?mode=desktop"
 }
 
 func Load() (*Config, error) {

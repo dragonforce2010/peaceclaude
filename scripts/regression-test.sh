@@ -310,10 +310,10 @@ if [[ -d /Applications/Claude.app ]]; then
   APP_DRY="$("$BIN" app run --dry-run)"
   if [[ "$APP_DRY" == *"--host-resolver-rules"* ]]; then
     fail "desktop_no_forbidden_switch" "desktop args unexpectedly contained --host-resolver-rules"
-  elif [[ "$APP_DRY" == *"--proxy-server=http://127.0.0.1:${HTTP_PORT}"* && "$APP_DRY" == *"--disable-quic"* ]]; then
-    ok "desktop_no_forbidden_switch" "Claude Desktop launch args valid & free of v6+ forbidden switches"
+  elif [[ "$APP_DRY" == *"--proxy-pac-url=http://127.0.0.1:${CTRL_PORT}/peaceclaude.pac?mode=desktop"* && "$APP_DRY" == *"--disable-quic"* ]]; then
+    ok "desktop_no_forbidden_switch" "Claude Desktop launch args valid (default desktop PAC mode) & free of v6+ forbidden switches"
   else
-    fail "desktop_no_forbidden_switch" "missing required isolation flags in: $APP_DRY"
+    fail "desktop_no_forbidden_switch" "missing required desktop PAC isolation flags in: $APP_DRY"
   fi
 fi
 
@@ -590,6 +590,137 @@ then
   ok "api_upstream_route_and_bypass_vpn" "/api/status.upstream_route and /api/config/update bypass_vpn toggle verified"
 else
   fail "api_upstream_route_and_bypass_vpn" "upstream_route or bypass_vpn API contract failed"
+fi
+
+# 16h. Regression guard for configurable desktop PAC & domain policy API + legacy proxy-bypass guard
+# (fixes blank corporate SSO pages in Claude Desktop PreviewContext across both universal PAC and proxy modes)
+cp "$TMP_HOME/config.json" "$TMP_HOME/config.json.bak.16h"
+FAKE_CLAUDE_APP="$TMP_HOME/fake-Claude.app"
+mkdir -p "$FAKE_CLAUDE_APP/Contents/MacOS"
+printf '#!/bin/sh\nexit 0\n' > "$FAKE_CLAUDE_APP/Contents/MacOS/Claude"
+chmod +x "$FAKE_CLAUDE_APP/Contents/MacOS/Claude"
+
+POLICY_PAC_PAYLOAD="$(python3 - "$EXPECTED_LIVE_IP" <<'PY'
+import json, sys
+print(json.dumps({
+    "expected_ip": sys.argv[1],
+    "telemetry_shield": True,
+    "allow_corporate_direct": True,
+    "desktop_proxy_mode": "pac",
+    "extra_claude_domains": ["custom-claude.example"],
+    "extra_blocked_domains": ["tracker.example"],
+    "corporate_domains": [".corp.internal", "git.corp.internal", ".claude.ai", ".com"],
+}))
+PY
+)"
+POLICY_PAC_RESP="$(curl -fsS -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H 'Content-Type: application/json' -d "$POLICY_PAC_PAYLOAD" "http://127.0.0.1:${CTRL_PORT}/api/config/update")"
+DESKTOP_PAC_JS="$(curl -fsS "http://127.0.0.1:${CTRL_PORT}/peaceclaude.pac?mode=desktop")"
+
+PAC_DESKTOP_EVAL="$(node - "$DESKTOP_PAC_JS" "$HTTP_PORT" <<'NODE'
+const vm = require('vm');
+const pacCode = process.argv[2];
+const httpPort = process.argv[3];
+const sandbox = {
+  dnsDomainIs(host, domain) {
+    return host === domain || (host.length > domain.length && host.slice(-domain.length) === domain);
+  },
+  isPlainHostName(host) { return host.indexOf('.') === -1; },
+  ipToNum(ip) {
+    const p = ip.split('.');
+    if (p.length !== 4) return 0;
+    return (((+p[0]) << 24) | ((+p[1]) << 16) | ((+p[2]) << 8) | (+p[3])) >>> 0;
+  },
+  isInNet(host, pattern, mask) {
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(host)) return false;
+    return (sandbox.ipToNum(host) & sandbox.ipToNum(mask)) === (sandbox.ipToNum(pattern) & sandbox.ipToNum(mask));
+  },
+};
+vm.runInNewContext(pacCode, sandbox);
+const mustProxy = ['claude.ai', 'custom-claude.example', 'sentry.io', 'tracker.example'];
+const mustDirect = ['sso.unknown-corp.internal', 'cdn.unknown-corp.net', '10.8.7.221'];
+const errors = [];
+for (const h of mustProxy) {
+  const res = sandbox.FindProxyForURL('https://' + h + '/', h);
+  if (!res.includes('127.0.0.1:' + httpPort)) errors.push(`expected PROXY for ${h}, got ${res}`);
+}
+for (const h of mustDirect) {
+  const res = sandbox.FindProxyForURL('https://' + h + '/', h);
+  if (res !== 'DIRECT') errors.push(`expected DIRECT for ${h}, got ${res}`);
+}
+console.log(errors.length === 0 ? 'OK' : errors.join('; '));
+NODE
+)"
+
+POLICY_PROXY_PAYLOAD="$(python3 - "$EXPECTED_LIVE_IP" <<'PY'
+import json, sys
+print(json.dumps({
+    "expected_ip": sys.argv[1],
+    "telemetry_shield": True,
+    "allow_corporate_direct": True,
+    "desktop_proxy_mode": "proxy",
+    "extra_claude_domains": ["custom-claude.example"],
+    "extra_blocked_domains": ["tracker.example"],
+    "corporate_domains": [".corp.internal", "git.corp.internal", ".claude.ai", ".com"],
+}))
+PY
+)"
+POLICY_PROXY_RESP="$(curl -fsS -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H 'Content-Type: application/json' -d "$POLICY_PROXY_PAYLOAD" "http://127.0.0.1:${CTRL_PORT}/api/config/update")"
+python3 - "$TMP_HOME/config.json" "$FAKE_CLAUDE_APP" <<'PY'
+import json, sys
+p, app_path = sys.argv[1], sys.argv[2]
+d = json.loads(open(p).read())
+d.setdefault("binaries", {})["claude_desktop_app"] = app_path
+open(p, "w").write(json.dumps(d, indent=2) + "\n")
+PY
+PROXY_MODE_DRY="$("$BIN" app --dry-run 2>&1 || echo '{}')"
+
+RESTORE_PAYLOAD="$(python3 - "$EXPECTED_LIVE_IP" <<'PY'
+import json, sys
+print(json.dumps({
+    "expected_ip": sys.argv[1],
+    "telemetry_shield": True,
+    "allow_corporate_direct": True,
+    "desktop_proxy_mode": "pac",
+    "extra_claude_domains": [],
+    "extra_blocked_domains": [],
+    "corporate_domains": [],
+}))
+PY
+)"
+curl -fsS -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H 'Content-Type: application/json' -d "$RESTORE_PAYLOAD" "http://127.0.0.1:${CTRL_PORT}/api/config/update" >/dev/null
+mv "$TMP_HOME/config.json.bak.16h" "$TMP_HOME/config.json"
+rm -rf "$FAKE_CLAUDE_APP"
+
+if python3 - "$POLICY_PAC_RESP" "$PAC_DESKTOP_EVAL" "$POLICY_PROXY_RESP" "$PROXY_MODE_DRY" "$HTTP_PORT" <<'PY'
+import json, sys
+pac_resp = json.loads(sys.argv[1])
+pac_eval = sys.argv[2].strip()
+proxy_resp = json.loads(sys.argv[3])
+proxy_dry = json.loads(sys.argv[4])
+http_port = sys.argv[5]
+
+sh_pac = pac_resp.get("config", {}).get("shield", {})
+assert sh_pac.get("desktop_proxy_mode") == "pac", sh_pac
+assert sh_pac.get("extra_claude_domains") == ["custom-claude.example"], sh_pac
+assert sh_pac.get("extra_blocked_domains") == ["tracker.example"], sh_pac
+assert sh_pac.get("corporate_domains") == [".corp.internal", "git.corp.internal", ".claude.ai", ".com"], sh_pac
+assert pac_eval == "OK", f"desktop PAC JS eval failed: {pac_eval}"
+
+assert proxy_resp.get("config", {}).get("shield", {}).get("desktop_proxy_mode") == "proxy", proxy_resp
+args = proxy_dry.get("args", [])
+assert f"--proxy-server=http://127.0.0.1:{http_port}" in args, args
+bypass_val = ""
+for a in args:
+    if a.startswith("--proxy-bypass-list="):
+        bypass_val = a.split("=", 1)[1]
+want_bypass = "127.0.0.1;localhost;::1;*.local;*.corp.internal;corp.internal;git.corp.internal"
+assert bypass_val == want_bypass, f"unexpected proxy-mode bypass: {bypass_val!r} != {want_bypass!r}"
+assert "claude.ai" not in bypass_val and "*.com" not in bypass_val, bypass_val
+PY
+then
+  ok "desktop_domain_policy_and_pac_mode" "domain policy API persistence, desktop PAC routing (unknown intranet=DIRECT), and proxy-mode bypass guard verified"
+else
+  fail "desktop_domain_policy_and_pac_mode" "desktop domain policy or PAC mode verification failed"
 fi
 
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes

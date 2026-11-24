@@ -139,8 +139,24 @@ func HostTimezoneName() string {
 	return name
 }
 
+// desktopCmdlineHasPeaceProxy verifies that a running Claude Desktop command line routes
+// traffic through PeaceClaude's local gateway via either --proxy-server or --proxy-pac-url.
+func desktopCmdlineHasPeaceProxy(cmdline string, cfg *config.Config) bool {
+	if cfg == nil {
+		return false
+	}
+	wantProxy := "--proxy-server=" + cfg.HTTPProxyURL()
+	wantPACBase := "--proxy-pac-url=" + cfg.ControlURL() + "/peaceclaude.pac"
+	for _, tok := range strings.Fields(cmdline) {
+		if tok == wantProxy || tok == wantPACBase || strings.HasPrefix(tok, wantPACBase+"?") {
+			return true
+		}
+	}
+	return false
+}
+
 // InspectRunningDesktop audits all currently running Claude Desktop main processes to verify
-// whether they were launched with PeaceClaude's isolation flags (--user-data-dir, --proxy-server, --disable-quic, --lang).
+// whether they were launched with PeaceClaude's isolation flags (--user-data-dir, --proxy-pac-url/--proxy-server, --disable-quic, --lang).
 func InspectRunningDesktop(cfg *config.Config) DesktopInspectReport {
 	rep := DesktopInspectReport{CheckedAt: time.Now().UTC()}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
@@ -152,10 +168,6 @@ func InspectRunningDesktop(cfg *config.Config) DesktopInspectReport {
 		return rep
 	}
 
-	wantProxy := ""
-	if cfg != nil {
-		wantProxy = "--proxy-server=" + cfg.HTTPProxyURL()
-	}
 	peaceProfiles := config.ProfilesDir()
 
 	for _, raw := range strings.Split(string(out), "\n") {
@@ -175,7 +187,7 @@ func InspectRunningDesktop(cfg *config.Config) DesktopInspectReport {
 			ok   bool
 		}{
 			{"isolated-user-data-dir", strings.Contains(cmdline, "--user-data-dir="+peaceProfiles)},
-			{"peace-proxy-server", wantProxy != "" && strings.Contains(cmdline, wantProxy)},
+			{"peace-proxy-server", desktopCmdlineHasPeaceProxy(cmdline, cfg)},
 			{"disable-quic", strings.Contains(cmdline, "--disable-quic")},
 			{"en-lang", strings.Contains(cmdline, "--lang=en")},
 		}

@@ -1222,29 +1222,50 @@ func (s *Server) handleNativeBrowserGuide(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, res)
 }
 
+func sanitizeDomainList(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, item := range in {
+		clean := strings.ToLower(strings.TrimSpace(item))
+		if clean == "" {
+			continue
+		}
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
+}
+
 func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		UpstreamMode          string   `json:"upstream_mode"`
-		UpstreamAddress       string   `json:"upstream_address"`
-		UpstreamUsername      string   `json:"upstream_username"`
-		UpstreamPassword      string   `json:"upstream_password"`
-		BypassVPN             *bool    `json:"bypass_vpn"`
-		OutboundInterface     *string  `json:"outbound_interface"`
-		ExpectedIP            string   `json:"expected_ip"`
-		AllowedCountries      []string `json:"allowed_countries"`
-		Language              string   `json:"language"`
-		Timezone              string   `json:"timezone"`
-		FailClosed            *bool    `json:"fail_closed"`
-		SyncTimezone          *bool    `json:"sync_timezone"`
-		TelemetryShield       *bool    `json:"telemetry_shield"`
-		StrictDomainIsolation *bool    `json:"strict_domain_isolation"`
-		SkipProbeDuringSSE    *bool    `json:"skip_probe_during_sse"`
-		StripHostAnthropicEnv *bool    `json:"strip_host_anthropic_env"`
-		AllowCorporateDirect  *bool    `json:"allow_corporate_direct"`
-		ProxyAuthDomains      *bool    `json:"proxy_auth_domains"`
-		VMProxyEnabled        *bool    `json:"vm_proxy_enabled"`
-		AutoPeaceDesktop      *bool    `json:"auto_peace_desktop"`
-		SingleActiveDesktop   *bool    `json:"single_active_desktop"`
+		UpstreamMode          string    `json:"upstream_mode"`
+		UpstreamAddress       string    `json:"upstream_address"`
+		UpstreamUsername      string    `json:"upstream_username"`
+		UpstreamPassword      string    `json:"upstream_password"`
+		BypassVPN             *bool     `json:"bypass_vpn"`
+		OutboundInterface     *string   `json:"outbound_interface"`
+		ExpectedIP            string    `json:"expected_ip"`
+		AllowedCountries      []string  `json:"allowed_countries"`
+		Language              string    `json:"language"`
+		Timezone              string    `json:"timezone"`
+		FailClosed            *bool     `json:"fail_closed"`
+		SyncTimezone          *bool     `json:"sync_timezone"`
+		TelemetryShield       *bool     `json:"telemetry_shield"`
+		StrictDomainIsolation *bool     `json:"strict_domain_isolation"`
+		SkipProbeDuringSSE    *bool     `json:"skip_probe_during_sse"`
+		StripHostAnthropicEnv *bool     `json:"strip_host_anthropic_env"`
+		AllowCorporateDirect  *bool     `json:"allow_corporate_direct"`
+		ProxyAuthDomains      *bool     `json:"proxy_auth_domains"`
+		DesktopProxyMode      *string   `json:"desktop_proxy_mode"`
+		CorporateDomains      *[]string `json:"corporate_domains"`
+		ExtraClaudeDomains    *[]string `json:"extra_claude_domains"`
+		ExtraBlockedDomains   *[]string `json:"extra_blocked_domains"`
+		VMProxyEnabled        *bool     `json:"vm_proxy_enabled"`
+		AutoPeaceDesktop      *bool     `json:"auto_peace_desktop"`
+		SingleActiveDesktop   *bool     `json:"single_active_desktop"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -1302,6 +1323,18 @@ func (s *Server) handleConfigUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.ProxyAuthDomains != nil {
 		next.Shield.ProxyAuthDomains = *body.ProxyAuthDomains
+	}
+	if body.DesktopProxyMode != nil {
+		next.Shield.DesktopProxyMode = strings.ToLower(strings.TrimSpace(*body.DesktopProxyMode))
+	}
+	if body.CorporateDomains != nil {
+		next.Shield.CorporateDomains = sanitizeDomainList(*body.CorporateDomains)
+	}
+	if body.ExtraClaudeDomains != nil {
+		next.Shield.ExtraClaudeDomains = sanitizeDomainList(*body.ExtraClaudeDomains)
+	}
+	if body.ExtraBlockedDomains != nil {
+		next.Shield.ExtraBlockedDomains = sanitizeDomainList(*body.ExtraBlockedDomains)
 	}
 	if body.VMProxyEnabled != nil {
 		next.Listen.VMProxyEnabled = *body.VMProxyEnabled

@@ -21,8 +21,9 @@ test-race:
 
 install: build
 	@mkdir -p $(HOME)/.local/bin
-	cp bin/$(BINARY) $(INSTALL_BIN)
-	chmod 755 $(INSTALL_BIN)
+	cp bin/$(BINARY) $(INSTALL_BIN).new
+	chmod 755 $(INSTALL_BIN).new
+	mv -f $(INSTALL_BIN).new $(INSTALL_BIN)
 	ln -sf $(BINARY) $(ALIAS_BIN)
 	$(INSTALL_BIN) --version
 

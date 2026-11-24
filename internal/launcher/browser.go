@@ -152,15 +152,16 @@ func LaunchLoginBrowserWithPID(ctx context.Context, cfg *config.Config, selfBin,
 
 	baseArgs := []string{
 		"--user-data-dir=" + prof.BrowserDir,
-		"--proxy-server=" + cfg.HTTPProxyURL(),
-		"--proxy-bypass-list=127.0.0.1;localhost;::1;*.local",
-		"--lang=" + lang,
-		"--accept-lang=" + acceptLangs,
+	}
+	baseArgs = append(baseArgs, BuildChromiumProxyArgs(cfg)...)
+	baseArgs = append(baseArgs,
+		"--lang="+lang,
+		"--accept-lang="+acceptLangs,
 		"--disable-quic",
 		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 		"--no-first-run",
 		"--no-default-browser-check",
-	}
+	)
 
 	if dryRun {
 		dryArgs := append([]string{}, baseArgs...)
