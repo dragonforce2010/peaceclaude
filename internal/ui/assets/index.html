@@ -801,6 +801,34 @@
                 </label>
                 <span class="status-tag" id="upstream-route-hint">--</span>
               </div>
+
+              <div class="section-sep" id="domain-policy-section">
+                <div style="margin-bottom:12px;">
+                  <div class="check-title">桌面端与域名路由策略</div>
+                  <p class="muted" style="margin-top:4px;">控制 Claude Desktop 与隔离浏览器的路由架构及自定义域名名单；PAC 与屏蔽规则保存后即时热生效，切换桌面端代理模式需重启 Claude Desktop。</p>
+                </div>
+                <div class="settings-grid">
+                  <div class="field">
+                    <label>桌面端与隔离浏览器代理模式</label>
+                    <select id="cfg-desktop-proxy-mode">
+                      <option value="pac">智能分流 PAC 模式（推荐：仅 Claude 与遥测走静态 IP，内网/SSO/CDN 全直连）</option>
+                      <option value="proxy">强制全代理 + 绕过列表模式（非白名单全量经本地代理转发）</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label>额外走静态 IP 域名（逗号分隔，PAC / 网关同步生效）</label>
+                    <input type="text" id="cfg-extra-claude-domains" placeholder="如 .custom-ai.example, api-alt.example" />
+                  </div>
+                  <div class="field">
+                    <label>企业内网 / 强制直连域名（逗号分隔，proxy 模式注入绕过列表）</label>
+                    <input type="text" id="cfg-corporate-domains" placeholder="如 .corp.example, git.corp.internal（内置 Anthropic 防穿透守卫）" />
+                  </div>
+                  <div class="field">
+                    <label>额外屏蔽域名（逗号分隔，PAC / 网关拦截）</label>
+                    <input type="text" id="cfg-extra-blocked-domains" placeholder="如 tracker.example, telemetry-extra.example" />
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div class="card">

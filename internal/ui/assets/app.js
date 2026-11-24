@@ -1072,6 +1072,10 @@
     $('cfg-strip-host-env').checked = !!cfg.identity.strip_host_anthropic_env;
     $('cfg-corp-direct').checked = !!cfg.shield.allow_corporate_direct;
     if ($('cfg-proxy-auth-domains')) $('cfg-proxy-auth-domains').checked = !!cfg.shield.proxy_auth_domains;
+    if ($('cfg-desktop-proxy-mode')) $('cfg-desktop-proxy-mode').value = (cfg.shield.desktop_proxy_mode === 'proxy' ? 'proxy' : 'pac');
+    if ($('cfg-extra-claude-domains')) $('cfg-extra-claude-domains').value = (cfg.shield.extra_claude_domains || []).join(', ');
+    if ($('cfg-corporate-domains')) $('cfg-corporate-domains').value = (cfg.shield.corporate_domains || []).join(', ');
+    if ($('cfg-extra-blocked-domains')) $('cfg-extra-blocked-domains').value = (cfg.shield.extra_blocked_domains || []).join(', ');
     if ($('cfg-bypass-vpn')) $('cfg-bypass-vpn').checked = cfg.upstream.bypass_vpn !== false;
     $('cfg-vm-proxy').checked = !!cfg.listen.vm_proxy_enabled;
     $('cfg-cred-hint').textContent = cfg.upstream.has_credentials ? '上游账密已加密存盘（界面不回显）' : '当前上游无认证凭据';
@@ -1903,6 +1907,17 @@
       toast(okMsg);
     } catch (e) { toast('保存失败: ' + e.message); }
   }
+  const parseDomainInputList = (raw) => {
+    const seen = new Set();
+    const out = [];
+    for (const item of String(raw || '').split(/[\s,;，；]+/)) {
+      const clean = item.trim().toLowerCase();
+      if (!clean || seen.has(clean)) continue;
+      seen.add(clean);
+      out.push(clean);
+    }
+    return out;
+  };
   const gatherAllSettings = () => ({
     upstream_mode: $('cfg-upstream-mode').value,
     upstream_address: $('cfg-upstream-addr').value.trim(),
@@ -1922,8 +1937,17 @@
     strip_host_anthropic_env: $('cfg-strip-host-env').checked,
     allow_corporate_direct: $('cfg-corp-direct').checked,
     proxy_auth_domains: $('cfg-proxy-auth-domains') ? $('cfg-proxy-auth-domains').checked : false,
+    desktop_proxy_mode: $('cfg-desktop-proxy-mode') ? $('cfg-desktop-proxy-mode').value : 'pac',
+    corporate_domains: $('cfg-corporate-domains') ? parseDomainInputList($('cfg-corporate-domains').value) : [],
+    extra_claude_domains: $('cfg-extra-claude-domains') ? parseDomainInputList($('cfg-extra-claude-domains').value) : [],
+    extra_blocked_domains: $('cfg-extra-blocked-domains') ? parseDomainInputList($('cfg-extra-blocked-domains').value) : [],
     bypass_vpn: $('cfg-bypass-vpn') ? $('cfg-bypass-vpn').checked : true,
     vm_proxy_enabled: $('cfg-vm-proxy').checked,
+  });
+  $('cfg-desktop-proxy-mode')?.addEventListener('change', () => {
+    saveConfigPayload(gatherAllSettings(), $('cfg-desktop-proxy-mode').value === 'pac'
+      ? '已切换为智能分流 PAC 模式（重启 Claude Desktop 后生效）'
+      : '已切换为强制全代理 + 绕过列表模式（重启 Claude Desktop 后生效）');
   });
   $('cfg-proxy-auth-domains')?.addEventListener('change', () => {
     saveConfigPayload(gatherAllSettings(), $('cfg-proxy-auth-domains').checked

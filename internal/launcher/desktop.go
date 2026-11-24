@@ -16,10 +16,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"peaceclaude/internal/config"
 	"peaceclaude/internal/egress"
 	"peaceclaude/internal/host"
+	"peaceclaude/internal/policy"
 	"peaceclaude/internal/profile"
 	"peaceclaude/internal/version"
 )
@@ -57,6 +59,147 @@ type DesktopSpec struct {
 	DataDir string   `json:"data_dir"`
 }
 
+// BuildProxyBypassList builds a Chromium --proxy-bypass-list value so loopback targets
+// and vetted corporate allowlist domains resolve DIRECT at the browser/Electron layer.
+// Electron's PreviewContext anti-SSRF check requires corporate intranet pages to use
+// direct transport rather than tunneling through a local proxy before direct fallback;
+// otherwise cross-origin private-resolving CDN assets are blocked.
+func BuildProxyBypassList(cfg *config.Config) string {
+	items := make([]string, 0, 16)
+	seen := make(map[string]struct{}, 16)
+	addItem := func(entry string) {
+		if entry == "" {
+			return
+		}
+		if _, ok := seen[entry]; ok {
+			return
+		}
+		seen[entry] = struct{}{}
+		items = append(items, entry)
+	}
+
+	for _, base := range []string{"127.0.0.1", "localhost", "::1", "*.local"} {
+		addItem(base)
+	}
+
+	if cfg == nil || !cfg.Shield.AllowCorporateDirect || len(cfg.Shield.CorporateDomains) == 0 {
+		return strings.Join(items, ";")
+	}
+
+	protected := collectProtectedClaudeDomains(cfg)
+	for _, rule := range cfg.Shield.CorporateDomains {
+		clean, isSuffix, ok := parseSafeCorporateDomain(rule)
+		if !ok || conflictsWithProtectedDomain(clean, isSuffix, protected) {
+			continue
+		}
+		if isSuffix {
+			// Chromium treats "*.example.com" as subdomains only; include the bare domain
+			// to match PeaceClaude's policy.matchesDomain and PAC dnsDomainIs semantics.
+			addItem("*." + clean)
+		}
+		addItem(clean)
+	}
+	return strings.Join(items, ";")
+}
+
+func collectProtectedClaudeDomains(cfg *config.Config) []string {
+	rawDomains := policy.ClaudeDomains()
+	if cfg != nil {
+		rawDomains = append(rawDomains, cfg.Shield.ExtraClaudeDomains...)
+	}
+	out := make([]string, 0, len(rawDomains))
+	for _, d := range rawDomains {
+		if clean := normalizeRuleDomain(d); clean != "" {
+			out = append(out, clean)
+		}
+	}
+	return out
+}
+
+func normalizeRuleDomain(rule string) string {
+	s := strings.ToLower(strings.TrimSpace(rule))
+	s = strings.TrimPrefix(s, "*.")
+	s = strings.TrimPrefix(s, ".")
+	return strings.Trim(s, ".")
+}
+
+func parseSafeCorporateDomain(rule string) (clean string, isSuffix bool, ok bool) {
+	raw := strings.ToLower(strings.TrimSpace(rule))
+	if raw == "" {
+		return "", false, false
+	}
+	for _, r := range raw {
+		if unicode.IsSpace(r) || r == ';' || r == ',' || r == '<' || r == '>' || r == '/' || r == ':' {
+			return "", false, false
+		}
+	}
+
+	rest := raw
+	if strings.HasPrefix(rest, "*.") {
+		isSuffix = true
+		rest = rest[2:]
+	} else if strings.HasPrefix(rest, ".") {
+		isSuffix = true
+		rest = rest[1:]
+	}
+	if strings.ContainsRune(rest, '*') {
+		return "", false, false
+	}
+
+	clean = strings.TrimSuffix(rest, ".")
+	if clean == "" || strings.Contains(clean, "..") {
+		return "", false, false
+	}
+	for _, label := range strings.Split(clean, ".") {
+		if !isValidHostnameLabel(label) {
+			return "", false, false
+		}
+	}
+	return clean, isSuffix, true
+}
+
+func isValidHostnameLabel(label string) bool {
+	if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+		return false
+	}
+	for _, r := range label {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func conflictsWithProtectedDomain(clean string, isSuffix bool, protected []string) bool {
+	for _, cd := range protected {
+		if clean == cd || strings.HasSuffix(clean, "."+cd) {
+			return true
+		}
+		if isSuffix && strings.HasSuffix(cd, "."+clean) {
+			return true
+		}
+	}
+	return false
+}
+
+// BuildChromiumProxyArgs returns Chromium network flags according to shield.desktop_proxy_mode:
+// "pac" (default) passes --proxy-pac-url so Claude/telemetry traffic goes through the gateway
+// while corporate/private intranet targets stay DIRECT; "proxy" passes --proxy-server + --proxy-bypass-list.
+func BuildChromiumProxyArgs(cfg *config.Config) []string {
+	if cfg == nil {
+		cfg = config.Default()
+	}
+	if cfg.EffectiveDesktopProxyMode() == "proxy" {
+		return []string{
+			"--proxy-server=" + cfg.HTTPProxyURL(),
+			"--proxy-bypass-list=" + BuildProxyBypassList(cfg),
+		}
+	}
+	return []string{
+		"--proxy-pac-url=" + cfg.DesktopPACURL(),
+	}
+}
+
 func BuildDesktopSpec(cfg *config.Config, prof *profile.Profile, gate egress.GateSnapshot, extraArgs []string) (*DesktopSpec, error) {
 	appTarget := strings.TrimSpace(cfg.Binaries.ClaudeDesktopApp)
 	bin := appTarget
@@ -78,16 +221,17 @@ func BuildDesktopSpec(cfg *config.Config, prof *profile.Profile, gate egress.Gat
 	// IMPORTANT: Official Claude Desktop v6+ explicitly rejects --host-resolver-rules
 	// (printing "refusing to start — a debugging or network-override switch is present")
 	// while internally disabling DNS prefetching (dnsPrefetchingEnabled=false).
-	// Passing --proxy-server + --disable-quic + proxy env vars routes all HTTP/HTTPS/WS
-	// traffic and hostname resolution through PeaceClaude's local gateway cleanly.
+	// Passing --proxy-pac-url (or --proxy-server) + --disable-quic + proxy env vars
+	// routes Claude traffic cleanly through PeaceClaude's local gateway.
 	args := []string{
 		"--user-data-dir=" + prof.DesktopDir,
-		"--proxy-server=" + cfg.HTTPProxyURL(),
-		"--proxy-bypass-list=127.0.0.1;localhost;::1;*.local",
-		"--lang=" + lang,
-		"--accept-lang=" + lang + ",en;q=0.9",
-		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
 	}
+	args = append(args, BuildChromiumProxyArgs(cfg)...)
+	args = append(args,
+		"--lang="+lang,
+		"--accept-lang="+lang+",en;q=0.9",
+		"--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+	)
 	if runtime.GOOS == "darwin" {
 		args = append(args, "-AppleLanguages", fmt.Sprintf("(%s)", lang), "-AppleLocale", appleLocale)
 	}

@@ -66,7 +66,7 @@ function FindProxyForURL(url, host) {
 		}
 	}
 	// Route only Anthropic-specific telemetry sinks into PeaceClaude's telemetry shield
-	// so third-party websites using sentry.io or statsigapi.net stay DIRECT.
+	// so third-party websites using sentry.io or statsigapi.net stay DIRECT for host browsers.
 	for _, d := range []string{
 		"o1158394.ingest.us.sentry.io",
 		"o1158394.ingest.sentry.io",
@@ -75,8 +75,21 @@ function FindProxyForURL(url, host) {
 	} {
 		addDomain(d)
 	}
-	for _, extra := range cfg.Shield.ExtraClaudeDomains {
-		addDomain(extra)
+	isDesktop := strings.EqualFold(strings.TrimSpace(mode), "desktop")
+	if isDesktop && cfg != nil && cfg.Shield.TelemetryShield {
+		for _, d := range policy.TelemetryDomains() {
+			addDomain(d)
+		}
+	}
+	if cfg != nil {
+		for _, extra := range cfg.Shield.ExtraClaudeDomains {
+			addDomain(extra)
+		}
+		if isDesktop {
+			for _, extra := range cfg.Shield.ExtraBlockedDomains {
+				addDomain(extra)
+			}
+		}
 	}
 
 	var domainChecks []string
@@ -94,7 +107,12 @@ function FindProxyForURL(url, host) {
 		cidrChecks = append(cidrChecks, fmt.Sprintf(`  if (isInNet(host, "%s", "%s")) return PROXY;`, ipNet.IP.String(), mask))
 	}
 
-	return fmt.Sprintf(`// PeaceClaude PAC (mode=claude) — fail-closed Claude/Anthropic routing, everything else DIRECT
+	modeLabel := "claude"
+	if isDesktop {
+		modeLabel = "desktop"
+	}
+
+	return fmt.Sprintf(`// PeaceClaude PAC (mode=%s) — fail-closed Claude/Anthropic routing, everything else DIRECT
 function FindProxyForURL(url, host) {
   var PROXY = "%s";
   host = host.toLowerCase().replace(/\.+$/, "");
@@ -105,5 +123,5 @@ function FindProxyForURL(url, host) {
   if (host.indexOf("2607:6bc0:") === 0 || host.indexOf("[2607:6bc0:") === 0) return PROXY;
   return "DIRECT";
 }
-`, proxyLine, strings.Join(domainChecks, "\n"), strings.Join(cidrChecks, "\n"))
+`, modeLabel, proxyLine, strings.Join(domainChecks, "\n"), strings.Join(cidrChecks, "\n"))
 }

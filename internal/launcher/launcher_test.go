@@ -105,29 +105,48 @@ func TestBuildDesktopSpecNeverUsesForbiddenClaudeSwitches(t *testing.T) {
 		EffectiveTimezone: "America/Denver",
 		EffectiveLanguage: "en-US",
 	}
+	// 1. Default "pac" mode: must emit --proxy-pac-url=.../peaceclaude.pac?mode=desktop and omit --proxy-server.
 	spec, err := BuildDesktopSpec(cfg, prof, gate, nil)
 	if err != nil {
-		t.Fatalf("BuildDesktopSpec: %v", err)
+		t.Fatalf("BuildDesktopSpec (pac): %v", err)
 	}
-
-	// Verify essential isolation switches are present.
 	joined := strings.Join(spec.Args, " ")
-	for _, want := range []string{"--user-data-dir=" + prof.DesktopDir, "--proxy-server=" + cfg.HTTPProxyURL(), "--disable-quic", "--lang=en-US"} {
+	for _, want := range []string{"--user-data-dir=" + prof.DesktopDir, "--proxy-pac-url=" + cfg.DesktopPACURL(), "--disable-quic", "--lang=en-US"} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("desktop args missing %q: %v", want, spec.Args)
+			t.Fatalf("desktop args (pac) missing %q: %v", want, spec.Args)
 		}
+	}
+	if strings.Contains(joined, "--proxy-server=") {
+		t.Fatalf("desktop args (pac) should not contain --proxy-server: %v", spec.Args)
 	}
 
 	// Regression guard: official Claude Desktop v6+ refuses to start if any forbidden switch is present.
-	for _, arg := range spec.Args {
-		clean := strings.TrimLeft(strings.ToLower(strings.TrimSpace(arg)), "-/")
-		name, _, _ := strings.Cut(clean, "=")
-		for _, forbidden := range ForbiddenClaudeDesktopSwitches {
-			if strings.HasPrefix(name, forbidden) {
-				t.Fatalf("BuildDesktopSpec emitted forbidden Claude Desktop switch %q (matches %q)", arg, forbidden)
+	assertNoForbiddenSwitches := func(args []string) {
+		for _, arg := range args {
+			clean := strings.TrimLeft(strings.ToLower(strings.TrimSpace(arg)), "-/")
+			name, _, _ := strings.Cut(clean, "=")
+			for _, forbidden := range ForbiddenClaudeDesktopSwitches {
+				if strings.HasPrefix(name, forbidden) {
+					t.Fatalf("BuildDesktopSpec emitted forbidden Claude Desktop switch %q (matches %q)", arg, forbidden)
+				}
 			}
 		}
 	}
+	assertNoForbiddenSwitches(spec.Args)
+
+	// 2. Explicit "proxy" mode: must emit --proxy-server and --proxy-bypass-list.
+	cfg.Shield.DesktopProxyMode = "proxy"
+	specProxy, err := BuildDesktopSpec(cfg, prof, gate, nil)
+	if err != nil {
+		t.Fatalf("BuildDesktopSpec (proxy): %v", err)
+	}
+	joinedProxy := strings.Join(specProxy.Args, " ")
+	for _, want := range []string{"--user-data-dir=" + prof.DesktopDir, "--proxy-server=" + cfg.HTTPProxyURL(), "--proxy-bypass-list=", "--disable-quic", "--lang=en-US"} {
+		if !strings.Contains(joinedProxy, want) {
+			t.Fatalf("desktop args (proxy) missing %q: %v", want, specProxy.Args)
+		}
+	}
+	assertNoForbiddenSwitches(specProxy.Args)
 }
 
 func TestEmbeddedMacOSSwiftSourceValid(t *testing.T) {
@@ -508,5 +527,95 @@ func TestCrossPlatformAutostartRenderers(t *testing.T) {
 	winCmd := RenderWindowsRunCommand(`C:\Program Files\PeaceClaude\peaceclaude.exe`)
 	if winCmd != `"C:\Program Files\PeaceClaude\peaceclaude.exe" service run` {
 		t.Fatalf("unexpected Windows Run command: %q", winCmd)
+	}
+}
+
+func TestBuildProxyBypassListCorporateDirectAndAnthropicGuard(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("PEACECLAUDE_HOME", tmp)
+	fakeApp := tmp + "/Claude.app"
+	fakeBin := fakeApp + "/Contents/MacOS/Claude"
+	if err := os.MkdirAll(fakeApp+"/Contents/MacOS", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	const baseBypass = "127.0.0.1;localhost;::1;*.local"
+
+	// 1. Positive case: vetted corporate domains expand to Chromium wildcard + bare/exact entries.
+	cfg := config.Default()
+	cfg.Binaries.ClaudeDesktopApp = fakeApp
+	cfg.Shield.DesktopProxyMode = "proxy"
+	cfg.Shield.AllowCorporateDirect = true
+	cfg.Shield.CorporateDomains = []string{".corp.example", "*.cdn.corp.net", "git.corp.org"}
+	wantBypass := baseBypass + ";*.corp.example;corp.example;*.cdn.corp.net;cdn.corp.net;git.corp.org"
+	if got := BuildProxyBypassList(cfg); got != wantBypass {
+		t.Fatalf("BuildProxyBypassList = %q, want %q", got, wantBypass)
+	}
+
+	prof, err := profile.Ensure(cfg, "bypass-check", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := egress.GateSnapshot{Open: true, EffectiveTimezone: "America/Denver", EffectiveLanguage: "en-US"}
+	spec, err := BuildDesktopSpec(cfg, prof, gate, nil)
+	if err != nil {
+		t.Fatalf("BuildDesktopSpec: %v", err)
+	}
+	wantFlag := "--proxy-bypass-list=" + wantBypass
+	foundFlag := false
+	for _, arg := range spec.Args {
+		if arg == wantFlag {
+			foundFlag = true
+			break
+		}
+	}
+	if !foundFlag {
+		t.Fatalf("BuildDesktopSpec args missing %q: %v", wantFlag, spec.Args)
+	}
+
+	// 2. Disabled allow_corporate_direct must revert strictly to loopback/local bypasses.
+	cfg.Shield.AllowCorporateDirect = false
+	if got := BuildProxyBypassList(cfg); got != baseBypass {
+		t.Fatalf("BuildProxyBypassList (disabled) = %q, want %q", got, baseBypass)
+	}
+	if got := BuildProxyBypassList(nil); got != baseBypass {
+		t.Fatalf("BuildProxyBypassList (nil) = %q, want %q", got, baseBypass)
+	}
+
+	// 3. Negative guard: Anthropic/Claude domains, broad TLD wildcards, and malformed/injection tokens must be rejected.
+	cfg.Shield.AllowCorporateDirect = true
+	cfg.Shield.CorporateDomains = []string{
+		".anthropic.com",
+		".claude.ai",
+		"api.anthropic.com",
+		"*.claude.com",
+		".com",
+		".ai",
+		"*.bad;evil.com",
+		"<local>",
+		"",
+		"*bad.example",
+		"a.*.b.example",
+		"-bad.example",
+		".corp.example",
+	}
+	wantGuarded := baseBypass + ";*.corp.example;corp.example"
+	if got := BuildProxyBypassList(cfg); got != wantGuarded {
+		t.Fatalf("BuildProxyBypassList (guard) = %q, want %q", got, wantGuarded)
+	}
+
+	// 4. Custom ExtraClaudeDomains must also be protected from corporate bypass overrides.
+	cfg.Shield.ExtraClaudeDomains = []string{"custom.claude.example"}
+	cfg.Shield.CorporateDomains = []string{
+		"custom.claude.example",
+		"sub.custom.claude.example",
+		".claude.example",
+		".corp.example",
+	}
+	if got := BuildProxyBypassList(cfg); got != wantGuarded {
+		t.Fatalf("BuildProxyBypassList (extra protected) = %q, want %q", got, wantGuarded)
 	}
 }
