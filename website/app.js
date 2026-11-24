@@ -99,8 +99,9 @@
       bnd_3: '<strong>Native Browser Opt-In:</strong> Modern Chromium/Arc blocks silent unsigned extension injection; PeaceClaude generates the auditable MV3 folder locally and guides a 10-second developer-mode load.',
       ins_kicker: '4-PLATFORM RELEASES · v0.2.0',
       ins_title: 'Deploy everywhere your Claude workflow runs.',
+      ins_dl_btn: 'Download macOS DMG',
       ins_copy: 'Copy Steps',
-      ins_docs: 'GitHub Repository',
+      ins_docs: 'All Releases',
       foot_note: 'Cross-Platform Zero-VM Static-IP Security Cockpit',
       tab_acc: 'Multi-Account',
       tab_sec: 'Security Doctor',
@@ -206,8 +207,9 @@
       bnd_3: '<strong>原生浏览器扩展机制：</strong>现代 Chromium/Arc 禁止静默植入未上架商店扩展；PeaceClaude 在本地生成可审计扩展源码并引导您 10 秒开启加载。',
       ins_kicker: '四端同步发布 · v0.2.0',
       ins_title: '覆盖您的每一台主力电脑与随身 iPhone。',
+      ins_dl_btn: '下载 macOS DMG',
       ins_copy: '复制步骤',
-      ins_docs: '查看 GitHub 仓库',
+      ins_docs: '全部 Releases',
       foot_note: '跨平台零虚拟机静态 IP Claude 全入口安全套件',
       tab_acc: '多账号工作台',
       tab_sec: '11 项安全体检',
@@ -362,6 +364,37 @@ cd peaceclaude/ios/PeaceSwitch
 xcodegen generate && open PeaceSwitch.xcodeproj`,
   };
 
+  const RELEASE_DOWNLOADS = {
+    macos: {
+      url: 'https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-macos-universal.dmg',
+      en: 'Download macOS DMG',
+      zh: '下载 macOS DMG',
+    },
+    windows: {
+      url: 'https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-windows-amd64.zip',
+      en: 'Download Windows ZIP',
+      zh: '下载 Windows ZIP',
+    },
+    ubuntu: {
+      url: 'https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-ubuntu-amd64.deb',
+      en: 'Download Ubuntu .deb',
+      zh: '下载 Ubuntu .deb',
+    },
+    ios: {
+      url: 'https://github.com/dragonforce2010/peaceclaude/blob/main/ios/APP_STORE_GUIDE.md',
+      en: 'iOS Build & App Store Guide',
+      zh: '查看 iOS 构建与上架指南',
+    },
+  };
+
+  function renderInstallAction() {
+    const dl = $('btn-download-mac');
+    if (!dl) return;
+    const item = RELEASE_DOWNLOADS[installMode] || RELEASE_DOWNLOADS.macos;
+    dl.href = item.url;
+    dl.textContent = curLang === 'zh' ? item.zh : item.en;
+  }
+
   function escapeHTML(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
@@ -460,6 +493,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     renderTelemetryDeck();
     renderGuide();
     renderIOSMockup();
+    renderInstallAction();
     try { localStorage.setItem('peaceclaude_site_lang', curLang); } catch {}
   }
 
@@ -545,6 +579,7 @@ xcodegen generate && open PeaceSwitch.xcodeproj`,
     btn.setAttribute('aria-selected', 'true');
     installMode = btn.dataset.mode || 'macos';
     $('install-code').innerHTML = '<code>' + escapeHTML(INSTALL_SNIPPETS[installMode] || '') + '</code>';
+    renderInstallAction();
   });
 
   $('btn-hero-copy')?.addEventListener('click', async () => {

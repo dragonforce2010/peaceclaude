@@ -2,32 +2,16 @@
 
 `website/` 目录为纯静态零构建网站（无 Node/Webpack 构建依赖，开箱即部署），同时适配 **GitHub Pages**、**Vercel** 与 **Cloudflare Pages**，并可绑定自定义域名（如 `peace-claude.app`）。
 
-> [!IMPORTANT]
-> **私有仓库与 GitHub Pages 提醒**：当前主仓库 `dragonforce2010/peaceclaude` 保持 **Private**（私有）。GitHub 仅对 **GitHub Pro / Team / Enterprise** 或 **Public（公开）** 仓库开放免费 GitHub Pages 发布。如果你的账号为 GitHub Free 且不想公开主代码仓，**推荐使用 Vercel 或 Cloudflare Pages 直接部署 `website/` 目录，主仓库可永久保持 Private**！
+> [!NOTE]
+> **当前正式官网托管方式**：本仓库 `dragonforce2010/peaceclaude` 现已公开，官网通过 GitHub Actions 工作流 [`.github/workflows/pages.yml`](../.github/workflows/pages.yml) 自动发布至 **GitHub Pages**：`https://dragonforce2010.github.io/peaceclaude/`。推送至 `main` 分支中 `website/**` 的改动会自动部署。
 
 ---
 
-## 方案 A：Vercel / Cloudflare Pages 部署（主仓可永久私有，推荐）
-
-1. **导入仓库或目录**：
-   - 在 [Vercel Dashboard](https://vercel.com/new) 中关联私有仓库 `dragonforce2010/peaceclaude`。
-   - 将 **Root Directory** 设置为 `website`（无需 Build Command，Output Directory 留空或 `.`）。
-   - `website/vercel.json` 已内置 `cleanUrls` 与静态安全响应头。
-2. **绑定自定义域名 `peace-claude.app`**：
-   - 注册域名（如 Porkbun / Cloudflare / Namecheap）后，在域名 DNS 面板按 Vercel 提示添加记录：
-     - `A` 记录：`@` -> `76.76.21.21`
-     - `CNAME` 记录：`www` -> `cname.vercel-dns.com.`
-   - Vercel 会自动签发 HTTPS 证书并启用强制 HTTPS 重定向。
-3. **如不想暴露主私有仓，也可单推静态展示仓**：
-   - 只需新建一个仅含 `website/` 内容的公开静态仓库用于托管官网，主代码仓依旧私有。
-
----
-
-## 方案 B：GitHub Pages 部署（适合 Pro 账户或官网拆出后使用）
+## 方案 A：GitHub Pages 部署（当前线上正式主站）
 
 1. 仓库已内置自动部署流水线 [`.github/workflows/pages.yml`](../.github/workflows/pages.yml)，推送修改到 `main` 分支的 `website/**` 时会自动触发上传与发布。
-2. 在 GitHub 仓库 `Settings -> Pages -> Build and deployment` 中选择 **Source: GitHub Actions**。
-3. 若绑定 `peace-claude.app`：
+2. GitHub 仓库 `Settings -> Pages -> Build and deployment` 已配置为 **Source: GitHub Actions**，默认访问地址为 `https://dragonforce2010.github.io/peaceclaude/`。
+3. 若绑定自定义域名 `peace-claude.app`：
    - 将 [`website/CNAME.example`](../website/CNAME.example) 复制或重命名为 `website/CNAME`（确认内容只有一行 `peace-claude.app`）。
    - 在域名 DNS 添加 4 条 GitHub Pages `A` 记录：
      - `185.199.108.153`
@@ -35,13 +19,21 @@
      - `185.199.110.153`
      - `185.199.111.153`
    - 若使用 `www.peace-claude.app`，追加 `CNAME`: `www -> dragonforce2010.github.io.`。
-   - 勾选 GitHub Pages 设置中的 **Enforce HTTPS**。
+   - 在 GitHub Pages 设置中勾选 **Enforce HTTPS**。
 
 ---
 
-## 方案 C：Netlify CLI 一键托管（当前线上示例站使用，主仓永久私有）
+## 方案 B：Vercel / Cloudflare Pages 备选托管
 
-当前测试线上官网已托管在 [https://peaceclaude-hub.netlify.app](https://peaceclaude-hub.netlify.app)（站点 ID `0444afef-3945-49ef-ba7c-dd0068ff5a36`）。任何官网改动都可通过以下命令从 `/tmp`（不污染工作区）秒级同步上线：
+1. 在 [Vercel Dashboard](https://vercel.com/new) 中关联仓库 `dragonforce2010/peaceclaude`。
+2. 将 **Root Directory** 设置为 `website`（无需 Build Command，Output Directory 留空或 `.`）。
+3. `website/vercel.json` 已内置 `cleanUrls` 与静态安全响应头，绑定 `peace-claude.app` 后自动签发 HTTPS 证书。
+
+---
+
+## 方案 C：Netlify CLI 备选托管
+
+曾使用的备用预览站点：[https://peaceclaude-hub.netlify.app](https://peaceclaude-hub.netlify.app)（站点 ID `0444afef-3945-49ef-ba7c-dd0068ff5a36`）。如需同步到 Netlify：
 
 ```bash
 cd /tmp && netlify deploy --prod \

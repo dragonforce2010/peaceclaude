@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="docs/CLI_GUIDE.md">CLI Guide</a> · <a href="website/index.html">Landing Page</a> · <a href="ios/APP_STORE_GUIDE.md">iOS App (PeaceSwitch)</a> · <a href="docs/DEPLOYMENT_GUIDE.md">Site Hosting</a>
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a> · <a href="docs/CLI_GUIDE.md">CLI Guide</a> · <a href="https://dragonforce2010.github.io/peaceclaude/">Landing Page</a> · <a href="ios/APP_STORE_GUIDE.md">iOS App (PeaceSwitch)</a> · <a href="docs/DEPLOYMENT_GUIDE.md">Site Hosting</a>
 </p>
 
 <p align="center">
@@ -106,12 +106,12 @@ Built as a pure-Go embedded console (`http://127.0.0.1:18899`) and native Swift/
 
 ### Option A: Universal macOS Release Package (No Go Required · Apple Silicon & Intel)
 
-Download from **GitHub Releases**:
+Download from [**GitHub Releases (`v0.2.0`)**](https://github.com/dragonforce2010/peaceclaude/releases/latest):
 
-- **DMG Installer (`PeaceClaude-v0.2.0-macos-universal.dmg`)**:
+- **DMG Installer ([`PeaceClaude-v0.2.0-macos-universal.dmg`](https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-macos-universal.dmg))**:
   1. Drag **`PeaceClaude.app`** into **`Applications`** (self-contained: embeds universal CLI inside `Contents/Resources/bin/peaceclaude`).
   2. Double-click **`Install-PeaceClaude-CLI.command`** in the DMG to install `peaceclaude` / `pclaude` CLI and start the LaunchAgent gateway.
-- **Offline Archive (`peaceclaude-v0.2.0-macos-universal.tar.gz`)**:
+- **Offline Archive ([`peaceclaude-v0.2.0-macos-universal.tar.gz`](https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/peaceclaude-v0.2.0-macos-universal.tar.gz))**:
   ```bash
   tar -xzf peaceclaude-v0.2.0-macos-universal.tar.gz
   cd peaceclaude-v0.2.0-macos-universal

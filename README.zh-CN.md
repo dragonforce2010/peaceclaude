@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="docs/CLI_GUIDE.md">CLI 完整指南</a> · <a href="website/index.html">独立介绍官网</a> · <a href="ios/APP_STORE_GUIDE.md">iOS 上架指南</a> · <a href="docs/DEPLOYMENT_GUIDE.md">官网托管指南</a>
+  <a href="README.md">English</a> · <strong>简体中文</strong> · <a href="docs/CLI_GUIDE.md">CLI 完整指南</a> · <a href="https://dragonforce2010.github.io/peaceclaude/">独立介绍官网</a> · <a href="ios/APP_STORE_GUIDE.md">iOS 上架指南</a> · <a href="docs/DEPLOYMENT_GUIDE.md">官网托管指南</a>
 </p>
 
 <p align="center">
@@ -107,12 +107,12 @@ flowchart LR
 
 ### 方式 A：下载 Release 通用离线包（免 Go 环境 · 支持 Apple Silicon 与 Intel）
 
-前往 **GitHub Releases** 下载对应包（支持 `shasum -a 256 -c SHA256SUMS.txt` 校验）：
+前往 [**GitHub Releases (`v0.2.0`)**](https://github.com/dragonforce2010/peaceclaude/releases/latest) 下载对应包（支持 `shasum -a 256 -c SHA256SUMS.txt` 校验）：
 
-- **图形化 DMG 镜像 (`PeaceClaude-v0.2.0-macos-universal.dmg`)**：
+- **图形化 DMG 镜像 ([`PeaceClaude-v0.2.0-macos-universal.dmg`](https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/PeaceClaude-v0.2.0-macos-universal.dmg))**：
   1. 将镜像中的 **`PeaceClaude.app`** 拖入 **`Applications`**（包内 `Contents/Resources/bin/peaceclaude` 已内嵌通用双架构二进制，拖入即可直接双击初始化运行）；
   2. 双击镜像内的 **`Install-PeaceClaude-CLI.command`** 一键安装 `peaceclaude` / `pclaude` 命令行并启动开机自启服务（完整保留现有 `~/.peaceclaude` 数据）。
-- **命令行离线包 (`peaceclaude-v0.2.0-macos-universal.tar.gz`)**：
+- **命令行离线包 ([`peaceclaude-v0.2.0-macos-universal.tar.gz`](https://github.com/dragonforce2010/peaceclaude/releases/download/v0.2.0/peaceclaude-v0.2.0-macos-universal.tar.gz))**：
   ```bash
   tar -xzf peaceclaude-v0.2.0-macos-universal.tar.gz
   cd peaceclaude-v0.2.0-macos-universal
