@@ -396,3 +396,48 @@ func TestDesktopFreeAccountInferenceAndUsageStatus(t *testing.T) {
 		t.Fatalf("expected unactivated profile to stay 未识别, got %q", loadedBlank.Account.PlanLabel)
 	}
 }
+
+func TestDeleteDefaultWhenOtherProfilesExistAndGuardLastProfile(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure(cfg, "default", "Default profile"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Ensure(cfg, "work", "Work profile"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.ActiveProfile = "default"
+	if err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Deleting "default" while "work" exists must succeed and move active_profile to "work".
+	if err := Delete(cfg, "default"); err != nil {
+		t.Fatalf("expected deleting default when work exists to succeed, got: %v", err)
+	}
+	if cfg.ActiveProfile != "work" {
+		t.Fatalf("expected active_profile fallback to work, got %q", cfg.ActiveProfile)
+	}
+
+	// 2. Subsequent List must NOT resurrect "default".
+	list, err := List(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Name != "work" {
+		t.Fatalf("expected only [work] after deleting default, got %+v", list)
+	}
+
+	// 3. Deleting the last remaining profile "work" must fail and preserve its directory.
+	if err := Delete(cfg, "work"); err == nil {
+		t.Fatal("expected deleting the last remaining profile to fail")
+	}
+	if _, err := os.Stat(Dir("work")); err != nil {
+		t.Fatalf("last remaining profile directory should remain intact: %v", err)
+	}
+}

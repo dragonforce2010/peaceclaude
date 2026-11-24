@@ -464,6 +464,9 @@ func TestDeleteActiveProfileSyncsMemoryConfigAndAccountsExposeSecurityScore(t *t
 	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
 
 	srv := New(config.Default(), "/usr/bin/true")
+	if _, err := profile.Ensure(srv.cfg, "default", "Default isolated profile"); err != nil {
+		t.Fatal(err)
+	}
 
 	// 1. Create a temporary profile and activate it.
 	reqCreate, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/profiles/create", bytes.NewBufferString(`{"name":"temp-acct","display_name":"临时账号","use_now":true}`))

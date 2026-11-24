@@ -738,6 +738,7 @@
 
     const hero = items.find((a) => a.active) || items[0];
     const others = items.filter((a) => a.name !== hero.name);
+    const canDelete = items.length > 1;
 
     // Render Hero Active Account Card
     {
@@ -804,7 +805,7 @@
             <div class="hero-secondary-actions">
               <button class="btn btn-ghost btn-sm" data-acc-detail="${esc(hero.name)}" type="button">详情与编辑</button>
               <button class="btn btn-ghost btn-sm" data-acc-cli="${esc(hero.name)}" type="button">复制 CLI</button>
-              ${hero.name !== 'default' ? `<button class="btn btn-danger-ghost btn-sm" data-acc-delete="${esc(hero.name)}" type="button">删除</button>` : ''}
+              ${canDelete ? `<button class="btn btn-danger-ghost btn-sm" data-acc-delete="${esc(hero.name)}" type="button">删除</button>` : ''}
             </div>
           </div>
         </article>`;
@@ -871,7 +872,7 @@
               <button class="btn btn-secondary btn-sm" data-acc-browser="${esc(a.name)}" type="button">浏览器</button>
               <button class="btn btn-secondary btn-sm" data-acc-detail="${esc(a.name)}" type="button">详情</button>
               <button class="btn btn-ghost btn-sm" data-acc-use="${esc(a.name)}" type="button">设为使用</button>
-              ${a.name !== 'default' ? `<button class="btn btn-danger-ghost btn-sm" data-acc-delete="${esc(a.name)}" type="button">删除</button>` : ''}
+              ${canDelete ? `<button class="btn btn-danger-ghost btn-sm" data-acc-delete="${esc(a.name)}" type="button">删除</button>` : ''}
             </div>
           </div>`;
       }).join('');
@@ -913,7 +914,8 @@
     $('det-btn-desktop').textContent = a.running_desktop_pid ? '切到 Desktop 前台' : (activated ? '切换并打开 Desktop' : '启动 Desktop 登录');
     $('det-btn-stop-desktop').classList.toggle('hidden', !a.running_desktop_pid);
     $('det-btn-use').classList.toggle('hidden', !!a.active);
-    $('det-btn-delete').classList.toggle('hidden', a.name === 'default');
+    const canDelete = ((accountsData && accountsData.accounts) || []).length > 1;
+    $('det-btn-delete').classList.toggle('hidden', !canDelete);
 
     $('det-usage-source').textContent = usage.source === 'oauth_api'
       ? `OAuth 实时 API (${fmtTime(usage.fetched_at)})`

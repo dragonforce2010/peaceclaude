@@ -371,10 +371,6 @@ func List(cfg *config.Config) ([]Profile, error) {
 	if err := config.EnsureDirs(); err != nil {
 		return nil, err
 	}
-	// Guarantee default profile exists.
-	if _, err := os.Stat(MetaPath("default")); errors.Is(err, os.ErrNotExist) {
-		_, _ = Ensure(cfg, "default", "Default isolated profile")
-	}
 	entries, err := os.ReadDir(config.ProfilesDir())
 	if err != nil {
 		return nil, err
@@ -385,6 +381,13 @@ func List(cfg *config.Config) ([]Profile, error) {
 			continue
 		}
 		if p, err := Load(cfg, e.Name()); err == nil {
+			out = append(out, *p)
+		}
+	}
+	// Seed a default profile only when no profiles exist yet, so deleting
+	// "default" when other profiles exist will not resurrect it.
+	if len(out) == 0 {
+		if p, err := Ensure(cfg, "default", "Default isolated profile"); err == nil && p != nil {
 			out = append(out, *p)
 		}
 	}
@@ -401,11 +404,37 @@ func Delete(cfg *config.Config, name string) error {
 	if err := ValidateName(name); err != nil {
 		return err
 	}
-	if name == "default" {
-		return errors.New("cannot delete the default profile; use `peaceclaude clean --profile default` instead")
+	all, err := List(cfg)
+	if err != nil {
+		return err
 	}
+	var remaining []Profile
+	found := false
+	for _, p := range all {
+		if p.Name == name {
+			found = true
+			continue
+		}
+		remaining = append(remaining, p)
+	}
+	if !found {
+		return fmt.Errorf("profile %q does not exist", name)
+	}
+	if len(remaining) == 0 {
+		return errors.New("cannot delete the last remaining profile; create another profile first or use peaceclaude clean")
+	}
+	sort.Slice(remaining, func(i, j int) bool {
+		return remaining[i].Name < remaining[j].Name
+	})
 	if cfg != nil && cfg.ActiveProfile == name {
-		cfg.ActiveProfile = "default"
+		fallback := remaining[0].Name
+		for _, p := range remaining {
+			if p.Name == "default" {
+				fallback = "default"
+				break
+			}
+		}
+		cfg.ActiveProfile = fallback
 		if err := config.Save(cfg); err != nil {
 			return err
 		}

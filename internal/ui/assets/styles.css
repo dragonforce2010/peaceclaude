@@ -1199,7 +1199,7 @@ body {
 .roster-rows { display: flex; flex-direction: column; }
 .roster-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.85fr) minmax(0, 0.85fr) minmax(0, 0.95fr) auto;
+  grid-template-columns: minmax(220px, 1.75fr) 128px minmax(175px, 1fr) 366px;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
@@ -1208,6 +1208,7 @@ body {
 }
 .roster-row:last-child { border-bottom: none; }
 .roster-row:hover { background: var(--bg-subtle); }
+.roster-row .btn-row { justify-content: flex-end; flex-wrap: nowrap; }
 
 .roster-col-id {
   display: flex;
@@ -1228,9 +1229,9 @@ body {
 }
 .roster-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.roster-col-state { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12.5px; }
+.roster-col-state { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; font-size: 12.5px; min-width: 0; }
 
-.roster-col-usage { display: flex; flex-direction: column; gap: var(--sp-1); }
+.roster-col-usage { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
 .mini-bar-row { display: flex; align-items: center; gap: var(--sp-2); font-size: 12px; color: var(--muted); }
 .mini-bar-row span:first-child { width: 28px; }
 .mini-bar-row .progress-track { flex: 1; height: 6px; }
@@ -2141,6 +2142,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--sp-3);
   }
+  .roster-row .btn-row { flex-wrap: wrap; }
 }
 
 @media (max-width: 820px) {
