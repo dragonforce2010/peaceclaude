@@ -37,6 +37,14 @@ type ServiceStatus struct {
 	Error             string `json:"error,omitempty"`
 }
 
+type RestartServiceResult struct {
+	OK        bool          `json:"ok"`
+	OldPID    int           `json:"old_pid,omitempty"`
+	NewPID    int           `json:"new_pid,omitempty"`
+	ManagedBy string        `json:"managed_by"` // launchd | systemd | detached
+	Status    ServiceStatus `json:"status"`
+}
+
 type EnsureLaunchAgentResult struct {
 	Action          string `json:"action"` // skipped | installed | repaired | restarted | disabled | disabled_in_sandbox | skipped_ephemeral_binary
 	Installed       bool   `json:"installed"`
@@ -207,6 +215,8 @@ func RenderLaunchAgentPlist(binPath string) string {
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>1</integer>
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key>
@@ -389,15 +399,19 @@ func defaultLaunchAgentOps(cfg *config.Config) launchAgentOps {
 		},
 		stopBare: func() { stopBareDaemonForHandoff(cfg) },
 		startLaunch: func(plist string) error {
-			_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
-			if err := exec.Command("launchctl", "bootstrap", fmt.Sprintf("gui/%s", uid), plist).Run(); err != nil {
+			if err := bootstrapLaunchAgentWithRetry(uid, plist, 5); err != nil {
 				return err
 			}
-			_ = exec.Command("launchctl", "kickstart", "-k", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
-			if !waitForDaemon(cfg, 8*time.Second) {
-				// Prevent KeepAlive LaunchAgent from fighting with any detached fallback daemon.
-				_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
-				return fmt.Errorf("launchd started agent but control API %s did not respond", cfg.ControlURL())
+			// RunAtLoad=true normally spawns the daemon within milliseconds; avoid killing a freshly spawned instance unless it hasn't come up yet.
+			if !waitForDaemon(cfg, 1800*time.Millisecond) {
+				kerr := kickstartLaunchAgent(uid)
+				if !waitForDaemon(cfg, 8*time.Second) {
+					_ = launchctlCommand("bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel))
+					if kerr != nil {
+						return fmt.Errorf("launchd started agent but control API %s did not respond (kickstart: %v)", cfg.ControlURL(), kerr)
+					}
+					return fmt.Errorf("launchd started agent but control API %s did not respond", cfg.ControlURL())
+				}
 			}
 			return nil
 		},
@@ -570,12 +584,77 @@ func StartService(cfg *config.Config, binPath string, useLaunchd bool) error {
 	return startDetachedDaemon(cfg, binPath)
 }
 
+func launchctlCommand(args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "launchctl", args...).CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail != "" {
+			return fmt.Errorf("launchctl %s: %w (%s)", strings.Join(args, " "), err, detail)
+		}
+		return fmt.Errorf("launchctl %s: %w", strings.Join(args, " "), err)
+	}
+	return nil
+}
+
+func waitForLaunchAgentUnloaded(uid string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if !isLaunchAgentLoaded(uid) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+func kickstartLaunchAgent(uid string) error {
+	return launchctlCommand("kickstart", "-k", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel))
+}
+
+func bootstrapLaunchAgentWithRetry(uid, plist string, attempts int) error {
+	if attempts <= 0 {
+		attempts = 5
+	}
+	_ = launchctlCommand("bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel))
+	_ = waitForLaunchAgentUnloaded(uid, 3*time.Second)
+
+	domain := fmt.Sprintf("gui/%s", uid)
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			time.Sleep(300 * time.Millisecond)
+		}
+		if err := launchctlCommand("bootstrap", domain, plist); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+func cleanupDeadPIDFile(pidPath string) {
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 1 || !isPIDAlive(pid) {
+		_ = os.Remove(pidPath)
+	}
+}
+
 func StopService(cfg *config.Config) error {
 	if canManageHostLaunchAgent() {
 		uid := strconv.Itoa(os.Getuid())
 		plist := LaunchAgentPath()
-		if _, err := os.Stat(plist); err == nil {
-			_ = exec.Command("launchctl", "bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel)).Run()
+		if _, err := os.Stat(plist); err == nil || isLaunchAgentLoaded(uid) {
+			_ = launchctlCommand("bootout", fmt.Sprintf("gui/%s/%s", uid, LaunchAgentLabel))
+			_ = waitForLaunchAgentUnloaded(uid, 3*time.Second)
 		}
 	}
 
@@ -584,23 +663,219 @@ func StopService(cfg *config.Config) error {
 	req, _ := http.NewRequest(http.MethodPost, cfg.ControlURL()+"/api/shutdown", nil)
 	_, _ = client.Do(req)
 
-	// Wait briefly, then fallback to PID file signal.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if ok, _ := DaemonHealth(cfg); !ok {
-			_ = os.Remove(config.DaemonPIDPath())
-			return nil
-		}
-		time.Sleep(150 * time.Millisecond)
+	if waitForDaemonDown(cfg, 4*time.Second) {
+		cleanupDeadPIDFile(config.DaemonPIDPath())
+		return nil
 	}
 
 	if raw, err := os.ReadFile(config.DaemonPIDPath()); err == nil {
 		if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 1 {
 			_ = signalTermPID(pid)
+			_ = waitForDaemonDown(cfg, 2*time.Second)
 		}
 	}
-	_ = os.Remove(config.DaemonPIDPath())
+	cleanupDeadPIDFile(config.DaemonPIDPath())
 	return nil
+}
+
+type restartServiceOps struct {
+	osName          string
+	canManageHost   bool
+	plistPath       string
+	readFile        func(string) ([]byte, error)
+	isExec          func(string) bool
+	isLoaded        func() bool
+	isHealthy       func() (bool, int)
+	kickstart       func() error
+	ensureAutostart func() (EnsureLaunchAgentResult, error)
+	stopService     func() error
+	waitDaemonDown  func() bool
+	startDetached   func() error
+	waitPIDChange   func(oldPID int) (bool, int)
+	systemdRestart  func() error
+	inspectStatus   func(running bool, pid int) ServiceStatus
+}
+
+func defaultRestartServiceOps(cfg *config.Config, binPath string) restartServiceOps {
+	uid := strconv.Itoa(os.Getuid())
+	return restartServiceOps{
+		osName:        runtime.GOOS,
+		canManageHost: CanManageHostLaunchAgent(),
+		plistPath:     LaunchAgentPath(),
+		readFile:      os.ReadFile,
+		isExec:        isRegularExecutable,
+		isLoaded:      func() bool { return isLaunchAgentLoaded(uid) },
+		isHealthy:     func() (bool, int) { return DaemonHealth(cfg) },
+		kickstart:     func() error { return kickstartLaunchAgent(uid) },
+		ensureAutostart: func() (EnsureLaunchAgentResult, error) {
+			return EnsureLaunchAgent(cfg, binPath, false)
+		},
+		stopService:    func() error { return StopService(cfg) },
+		waitDaemonDown: func() bool { return waitForDaemonDown(cfg, 4*time.Second) },
+		startDetached:  func() error { return startDetachedDaemon(cfg, binPath) },
+		waitPIDChange:  func(oldPID int) (bool, int) { return waitForDaemonPIDChange(cfg, oldPID, 8*time.Second) },
+		systemdRestart: func() error {
+			if _, err := exec.LookPath("systemctl"); err != nil {
+				return err
+			}
+			out, err := exec.Command("systemctl", "--user", "restart", LinuxSystemdUnitName).CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("systemctl restart: %w (%s)", err, strings.TrimSpace(string(out)))
+			}
+			return nil
+		},
+		inspectStatus: func(running bool, pid int) ServiceStatus {
+			return InspectLaunchAgentStatus(cfg, running, pid)
+		},
+	}
+}
+
+func restartServiceWithOps(cfg *config.Config, useLaunchd bool, ops restartServiceOps) (RestartServiceResult, error) {
+	running, oldPID := ops.isHealthy()
+	if !running {
+		oldPID = 0
+	}
+	res := RestartServiceResult{OldPID: oldPID}
+
+	if ops.osName == "darwin" && useLaunchd && ops.canManageHost {
+		raw, err := ops.readFile(ops.plistPath)
+		plistValid := false
+		if err == nil {
+			_, plistValid = ValidateLaunchAgentPlist(string(raw), ops.isExec)
+		}
+		loaded := ops.isLoaded != nil && ops.isLoaded()
+
+		// Fast atomic restart path: LaunchAgent already loaded and plist valid -> kickstart -k directly.
+		if plistValid && loaded && ops.kickstart != nil {
+			if kerr := ops.kickstart(); kerr == nil {
+				if ok, newPID := ops.waitPIDChange(oldPID); ok {
+					res.OK = true
+					res.NewPID = newPID
+					res.ManagedBy = "launchd"
+					if ops.inspectStatus != nil {
+						res.Status = ops.inspectStatus(true, newPID)
+					}
+					return res, nil
+				}
+			}
+		}
+
+		// Cold/repair reload path: cleanly stop any existing process/job so bootout settles and ports free, then EnsureLaunchAgent.
+		if ops.stopService != nil {
+			_ = ops.stopService()
+		}
+		if ops.waitDaemonDown != nil {
+			_ = ops.waitDaemonDown()
+		}
+		ensureRes, eerr := ops.ensureAutostart()
+		if eerr != nil {
+			return res, fmt.Errorf("通过 LaunchAgent 重启网关失败: %w", eerr)
+		}
+		newPID := ensureRes.PID
+		if !ensureRes.Running || newPID == 0 || (oldPID > 0 && newPID == oldPID) {
+			ok, p2 := ops.waitPIDChange(oldPID)
+			if !ok {
+				return res, fmt.Errorf("LaunchAgent 已重新加载，但未检测到新网关 PID 就绪 (old_pid=%d)", oldPID)
+			}
+			newPID = p2
+		}
+		res.OK = true
+		res.NewPID = newPID
+		res.ManagedBy = "launchd"
+		if ops.inspectStatus != nil {
+			res.Status = ops.inspectStatus(true, newPID)
+		}
+		return res, nil
+	}
+
+	if ops.osName == "linux" && useLaunchd && ops.canManageHost && ops.isLoaded != nil && ops.isLoaded() && ops.systemdRestart != nil {
+		if err := ops.systemdRestart(); err == nil {
+			if ok, newPID := ops.waitPIDChange(oldPID); ok {
+				res.OK = true
+				res.NewPID = newPID
+				res.ManagedBy = "systemd"
+				if ops.inspectStatus != nil {
+					res.Status = ops.inspectStatus(true, newPID)
+				}
+				return res, nil
+			}
+		}
+	}
+
+	if ops.stopService != nil {
+		_ = ops.stopService()
+	}
+	if ops.waitDaemonDown != nil {
+		_ = ops.waitDaemonDown()
+	}
+	if err := config.EnsureDirs(); err != nil {
+		return res, err
+	}
+	if err := ops.startDetached(); err != nil {
+		return res, err
+	}
+	ok, newPID := ops.waitPIDChange(oldPID)
+	if !ok {
+		return res, fmt.Errorf("重启后的后台网关未能在规定时间内就绪")
+	}
+	res.OK = true
+	res.NewPID = newPID
+	res.ManagedBy = "detached"
+	if ops.inspectStatus != nil {
+		res.Status = ops.inspectStatus(true, newPID)
+	}
+	return res, nil
+}
+
+// RestartService cleanly restarts the PeaceClaude background gateway daemon without disturbing
+// running Claude Desktop or isolated browser windows, ensuring LaunchAgent custody when enabled.
+func RestartService(cfg *config.Config, binPath string, useLaunchd bool) (RestartServiceResult, error) {
+	return restartServiceWithOps(cfg, useLaunchd, defaultRestartServiceOps(cfg, binPath))
+}
+
+// TriggerSelfRestart is invoked asynchronously from inside a running daemon to hand off execution
+// to a fresh daemon PID under the active supervisor (launchd/systemd) or a detached restarter helper.
+func TriggerSelfRestart(cfg *config.Config, selfBin string, managedBy string) error {
+	switch managedBy {
+	case "launchd":
+		if runtime.GOOS != "darwin" || !canManageHostLaunchAgent() {
+			return fmt.Errorf("launchd self-restart unavailable in current environment")
+		}
+		return kickstartLaunchAgent(strconv.Itoa(os.Getuid()))
+	case "systemd":
+		if runtime.GOOS != "linux" || !canManageHostAutostartAnyOS() {
+			return fmt.Errorf("systemd self-restart unavailable in current environment")
+		}
+		out, err := exec.Command("systemctl", "--user", "restart", LinuxSystemdUnitName).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("systemctl restart: %w (%s)", err, strings.TrimSpace(string(out)))
+		}
+		return nil
+	default:
+		bin := strings.TrimSpace(selfBin)
+		if !isRegularExecutable(bin) {
+			return fmt.Errorf("self binary is not executable: %q", bin)
+		}
+		if err := config.EnsureDirs(); err != nil {
+			return err
+		}
+		logFile, err := os.OpenFile(config.DaemonLogPath(), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			return err
+		}
+		cmd := exec.Command(bin, "service", "restart", "--no-launchd")
+		cmd.Env = os.Environ()
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		setDetachedProcessAttr(cmd)
+		if err := cmd.Start(); err != nil {
+			_ = logFile.Close()
+			return fmt.Errorf("spawn detached restarter: %w", err)
+		}
+		_ = logFile.Close()
+		go func() { _ = cmd.Wait() }()
+		return nil
+	}
 }
 
 func UninstallLaunchAgent(cfg *config.Config) error {
@@ -624,6 +899,30 @@ func waitForDaemon(cfg *config.Config, timeout time.Duration) bool {
 		time.Sleep(150 * time.Millisecond)
 	}
 	return false
+}
+
+func waitForDaemonDown(cfg *config.Config, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if ok, _ := DaemonHealth(cfg); !ok {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+func waitForDaemonPIDChange(cfg *config.Config, oldPID int, timeout time.Duration) (bool, int) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ok, pid := DaemonHealth(cfg); ok && pid > 0 && (oldPID <= 0 || pid != oldPID) {
+			return true, pid
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return false, 0
 }
 
 // FetchGateSnapshot queries the running daemon's Egress Gate state.

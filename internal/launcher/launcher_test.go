@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -74,7 +75,14 @@ func TestBuildIsolatedEnvStripsHostPollutionAndInjectsPeace(t *testing.T) {
 func TestRenderLaunchAgentPlist(t *testing.T) {
 	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
 	plist := RenderLaunchAgentPlist("/Users/test/.local/bin/peaceclaude")
-	for _, need := range []string{LaunchAgentLabel, "/Users/test/.local/bin/peaceclaude", "<string>service</string>", "<string>run</string>"} {
+	for _, need := range []string{
+		LaunchAgentLabel,
+		"/Users/test/.local/bin/peaceclaude",
+		"<string>service</string>",
+		"<string>run</string>",
+		"<key>ThrottleInterval</key>",
+		"<integer>1</integer>",
+	} {
 		if !strings.Contains(plist, need) {
 			t.Fatalf("plist missing %q", need)
 		}
@@ -150,7 +158,16 @@ func TestBuildDesktopSpecNeverUsesForbiddenClaudeSwitches(t *testing.T) {
 }
 
 func TestEmbeddedMacOSSwiftSourceValid(t *testing.T) {
-	for _, sym := range []string{"WKWebView", "NSApplicationDelegate", "runJavaScriptConfirmPanelWithMessage", "#accounts", "ensure-autostart"} {
+	for _, sym := range []string{
+		"WKWebView",
+		"NSApplicationDelegate",
+		"runJavaScriptConfirmPanelWithMessage",
+		"#accounts",
+		"ensure-autostart",
+		"restartGateway",
+		"/api/service/restart",
+		"重启安全网关",
+	} {
 		if !strings.Contains(macOSAppSwiftSrc, sym) {
 			t.Fatalf("embedded app_macos.swift missing %q", sym)
 		}
@@ -688,5 +705,115 @@ func TestInspectIsolatedBrowserProfileDetectsChinesePrefsAndDisabledShield(t *te
 	disHealth := InspectIsolatedBrowserProfile(bdir)
 	if !disHealth.ExtLoaded || disHealth.ExtEnabled || len(disHealth.Issues) == 0 {
 		t.Fatalf("expected disabled shield flagged, got %+v", disHealth)
+	}
+}
+
+func TestRestartServiceWithOps(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	cfg := config.Default()
+	validBin := "/Users/demo/.local/bin/peaceclaude"
+	validPlist := RenderLaunchAgentPlist(validBin)
+
+	// 1. Loaded valid LaunchAgent on darwin -> kickstart -k directly without stopService/ensureAutostart.
+	kickCalled := false
+	stopCalled := false
+	ensureCalled := false
+	res, err := restartServiceWithOps(cfg, true, restartServiceOps{
+		osName:        "darwin",
+		canManageHost: true,
+		plistPath:     "/tmp/test-agent.plist",
+		readFile:      func(string) ([]byte, error) { return []byte(validPlist), nil },
+		isExec:        func(p string) bool { return p == validBin },
+		isLoaded:      func() bool { return true },
+		isHealthy:     func() (bool, int) { return true, 1001 },
+		kickstart: func() error {
+			kickCalled = true
+			return nil
+		},
+		stopService: func() error {
+			stopCalled = true
+			return nil
+		},
+		ensureAutostart: func() (EnsureLaunchAgentResult, error) {
+			ensureCalled = true
+			return EnsureLaunchAgentResult{}, nil
+		},
+		waitPIDChange: func(oldPID int) (bool, int) {
+			if oldPID != 1001 {
+				t.Fatalf("expected oldPID=1001, got %d", oldPID)
+			}
+			return true, 2002
+		},
+		inspectStatus: func(running bool, pid int) ServiceStatus {
+			return ServiceStatus{Running: running, PID: pid, LaunchAgentLoaded: true}
+		},
+	})
+	if err != nil {
+		t.Fatalf("kickstart path failed: %v", err)
+	}
+	if !kickCalled || stopCalled || ensureCalled || !res.OK || res.OldPID != 1001 || res.NewPID != 2002 || res.ManagedBy != "launchd" {
+		t.Fatalf("unexpected kickstart result: res=%+v kick=%t stop=%t ensure=%t", res, kickCalled, stopCalled, ensureCalled)
+	}
+
+	// 2. kickstart -k fails -> cleanly stops & falls back to ensureAutostart (bootout+bootstrap retry path), never silent detached.
+	stopCalled = false
+	waitDownCalled := false
+	ensureCalled = false
+	res, err = restartServiceWithOps(cfg, true, restartServiceOps{
+		osName:         "darwin",
+		canManageHost:  true,
+		plistPath:      "/tmp/test-agent.plist",
+		readFile:       func(string) ([]byte, error) { return []byte(validPlist), nil },
+		isExec:         func(p string) bool { return p == validBin },
+		isLoaded:       func() bool { return true },
+		isHealthy:      func() (bool, int) { return true, 3001 },
+		kickstart:      func() error { return errors.New("kickstart failed") },
+		stopService:    func() error { stopCalled = true; return nil },
+		waitDaemonDown: func() bool { waitDownCalled = true; return true },
+		ensureAutostart: func() (EnsureLaunchAgentResult, error) {
+			ensureCalled = true
+			return EnsureLaunchAgentResult{Action: "restarted", Running: true, Loaded: true, PID: 3002}, nil
+		},
+		waitPIDChange: func(int) (bool, int) { return true, 3002 },
+		inspectStatus: func(running bool, pid int) ServiceStatus {
+			return ServiceStatus{Running: running, PID: pid, LaunchAgentLoaded: true}
+		},
+	})
+	if err != nil || !stopCalled || !waitDownCalled || !ensureCalled || res.NewPID != 3002 || res.ManagedBy != "launchd" {
+		t.Fatalf("cold launchd reload path mismatch: res=%+v err=%v stop=%t down=%t ensure=%t", res, err, stopCalled, waitDownCalled, ensureCalled)
+	}
+
+	// 3. ensureAutostart failure MUST surface explicit error (do not silently drop LaunchAgent custody).
+	_, err = restartServiceWithOps(cfg, true, restartServiceOps{
+		osName:          "darwin",
+		canManageHost:   true,
+		plistPath:       "/tmp/test-agent.plist",
+		readFile:        func(string) ([]byte, error) { return nil, os.ErrNotExist },
+		isExec:          func(string) bool { return true },
+		isLoaded:        func() bool { return false },
+		isHealthy:       func() (bool, int) { return false, 0 },
+		stopService:     func() error { return nil },
+		waitDaemonDown:  func() bool { return true },
+		ensureAutostart: func() (EnsureLaunchAgentResult, error) { return EnsureLaunchAgentResult{}, errors.New("bootstrap rejected") },
+		startDetached:   func() error { t.Fatal("must not fall back to detached when launchd explicitly failed"); return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "bootstrap rejected") {
+		t.Fatalf("expected explicit LaunchAgent error, got %v", err)
+	}
+
+	// 4. Sandbox / --no-launchd mode -> detached restart flow.
+	detachedCalled := false
+	res, err = restartServiceWithOps(cfg, false, restartServiceOps{
+		osName:         "darwin",
+		canManageHost:  false,
+		isHealthy:      func() (bool, int) { return true, 4001 },
+		stopService:    func() error { return nil },
+		waitDaemonDown: func() bool { return true },
+		startDetached:  func() error { detachedCalled = true; return nil },
+		waitPIDChange:  func(int) (bool, int) { return true, 4002 },
+		inspectStatus:  func(running bool, pid int) ServiceStatus { return ServiceStatus{Running: running, PID: pid} },
+	})
+	if err != nil || !detachedCalled || res.OldPID != 4001 || res.NewPID != 4002 || res.ManagedBy != "detached" {
+		t.Fatalf("detached restart mismatch: res=%+v err=%v detached=%t", res, err, detachedCalled)
 	}
 }

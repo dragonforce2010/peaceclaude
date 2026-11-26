@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -648,7 +650,20 @@ func TestMobileExtendedStateAndActions(t *testing.T) {
 	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
 	t.Setenv("PEACECLAUDE_NO_LAUNCHD", "1")
 	t.Setenv("PEACECLAUDE_NO_SYS_PAC", "1")
+	t.Setenv("PEACECLAUDE_NO_NOTIFY", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_AUTO_PEACE", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
 	srv := New(config.Default(), "/usr/bin/true")
+	srv.Gate().SetProbeFunc(func(_ context.Context, _ *config.Config) egress.ProbeResult {
+		return egress.ProbeResult{
+			CheckedAt: time.Now().UTC(),
+			OK:        true,
+			EgressIP:  "198.51.100.10",
+			Country:   "US",
+			Timezone:  "America/Denver",
+			Source:    "mock",
+		}
+	})
 
 	// Pair a mobile client via internal RemoteManager
 	snapCfg := srv.configSnapshot()
@@ -798,5 +813,118 @@ func TestDoctorRepairBrowserShieldsCleansChinesePrefsAndUpgradesArtifacts(t *tes
 	}
 	if _, err := os.Stat(filepath.Join(extDir, "background.js")); err != nil {
 		t.Fatalf("expected background.js artifact generated: %v", err)
+	}
+}
+
+func TestHandleServiceRestartCSRFAndSingleFlight(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_NO_NOTIFY", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_AUTO_PEACE", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
+
+	srv := New(config.Default(), "/usr/bin/true")
+	var hookCalls atomic.Int32
+	doneCh := make(chan string, 2)
+	srv.restartHook = func(_ context.Context, managedBy string) {
+		hookCalls.Add(1)
+		doneCh <- managedBy
+	}
+	handler := srv.controlHandler()
+
+	// 1. Negative security guard: cross-origin POST MUST return 403
+	reqBadOrigin, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/service/restart", bytes.NewBufferString("{}"))
+	reqBadOrigin.Header.Set("Origin", "https://evil.test")
+	rrBadOrigin := newResponseRecorder()
+	handler.ServeHTTP(rrBadOrigin, reqBadOrigin)
+	if rrBadOrigin.code != http.StatusForbidden {
+		t.Fatalf("expected 403 for cross-origin POST /api/service/restart, got %d", rrBadOrigin.code)
+	}
+
+	// 2. Method guard: GET MUST return 405
+	reqGet, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/api/service/restart", nil)
+	rrGet := newResponseRecorder()
+	handler.ServeHTTP(rrGet, reqGet)
+	if rrGet.code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405 for GET /api/service/restart, got %d", rrGet.code)
+	}
+
+	// 3. Valid loopback POST -> 200 OK with old_pid and single-flight trigger
+	reqOK, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/service/restart", bytes.NewBufferString("{}"))
+	reqOK.Header.Set("Origin", "http://127.0.0.1")
+	rrOK := newResponseRecorder()
+	handler.ServeHTTP(rrOK, reqOK)
+	if rrOK.code != http.StatusOK {
+		t.Fatalf("expected 200 for valid /api/service/restart, got %d: %s", rrOK.code, rrOK.body.String())
+	}
+	var res1 map[string]any
+	if err := json.Unmarshal(rrOK.body.Bytes(), &res1); err != nil {
+		t.Fatal(err)
+	}
+	if res1["ok"] != true || res1["restarting"] != true || int(res1["old_pid"].(float64)) != os.Getpid() {
+		t.Fatalf("unexpected restart response: %+v", res1)
+	}
+
+	select {
+	case mb := <-doneCh:
+		if mb != "detached" {
+			t.Fatalf("expected sandbox managed_by=detached, got %q", mb)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for async restartHook")
+	}
+
+	// 4. Duplicate request while already restarting -> idempotent already_restarting=true without second hook call
+	reqDup, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/service/restart", bytes.NewBufferString("{}"))
+	reqDup.Header.Set("Origin", "http://127.0.0.1")
+	rrDup := newResponseRecorder()
+	handler.ServeHTTP(rrDup, reqDup)
+	if rrDup.code != http.StatusOK {
+		t.Fatalf("expected 200 on concurrent restart request, got %d", rrDup.code)
+	}
+	var res2 map[string]any
+	if err := json.Unmarshal(rrDup.body.Bytes(), &res2); err != nil {
+		t.Fatal(err)
+	}
+	if res2["already_restarting"] != true {
+		t.Fatalf("expected already_restarting=true on duplicate POST, got %+v", res2)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if got := hookCalls.Load(); got != 1 {
+		t.Fatalf("expected restartHook invoked once under single-flight guard, got %d", got)
+	}
+}
+
+func TestShutdownDoesNotDeleteForeignPIDFile(t *testing.T) {
+	t.Setenv("PEACECLAUDE_HOME", t.TempDir())
+	t.Setenv("PEACECLAUDE_NO_NOTIFY", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_AUTO_PEACE", "1")
+	t.Setenv("PEACECLAUDE_DISABLE_KEYCHAIN", "1")
+	if err := config.EnsureDirs(); err != nil {
+		t.Fatal(err)
+	}
+
+	pidPath := config.DaemonPIDPath()
+	// 1. Foreign PID present -> old Shutdown must NOT remove it.
+	if err := os.WriteFile(pidPath, []byte("999991\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv1 := New(config.Default(), "/usr/bin/true")
+	srv1.Shutdown(context.Background())
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatalf("expected foreign PID file preserved after Shutdown, err=%v", err)
+	}
+	if strings.TrimSpace(string(raw)) != "999991" {
+		t.Fatalf("unexpected PID file content: %q", string(raw))
+	}
+
+	// 2. Own PID present -> Shutdown cleans it up cleanly.
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv2 := New(config.Default(), "/usr/bin/true")
+	srv2.Shutdown(context.Background())
+	if _, err := os.Stat(pidPath); !os.IsNotExist(err) {
+		t.Fatalf("expected own PID file removed after Shutdown, stat err=%v", err)
 	}
 }

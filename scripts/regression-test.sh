@@ -24,19 +24,30 @@ cleanup() {
   for p in "${CURL_PIDS[@]:-}"; do
     [[ -n "$p" ]] && kill "$p" 2>/dev/null || true
   done
+  local pids_to_kill=()
   if [[ -n "$DAEMON_PID" ]]; then
-    kill "$DAEMON_PID" 2>/dev/null || true
+    pids_to_kill+=("$DAEMON_PID")
+  fi
+  if [[ -r "$TMP_HOME/daemon.pid" ]]; then
+    local file_pid
+    file_pid="$(tr -d '[:space:]' < "$TMP_HOME/daemon.pid" 2>/dev/null || true)"
+    if [[ "$file_pid" =~ ^[0-9]+$ && "$file_pid" != "$DAEMON_PID" ]]; then
+      pids_to_kill+=("$file_pid")
+    fi
+  fi
+  for pid in "${pids_to_kill[@]:-}"; do
+    kill "$pid" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
-      if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+      if ! kill -0 "$pid" 2>/dev/null; then
         break
       fi
       sleep 0.25
     done
-    if kill -0 "$DAEMON_PID" 2>/dev/null; then
-      kill -9 "$DAEMON_PID" 2>/dev/null || true
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
     fi
-    wait "$DAEMON_PID" 2>/dev/null || true
-  fi
+    wait "$pid" 2>/dev/null || true
+  done
   rm -rf "$TMP_HOME"
 }
 trap cleanup EXIT
@@ -791,6 +802,84 @@ then
   ok "login_pac_and_doctor_shield_repair" "mode=login PAC (Turnstile/hCaptcha/Stripe/Stytch proxied, Google OAuth DIRECT) & doctor shield repair verified"
 else
   fail "login_pac_and_doctor_shield_repair" "login PAC ($LOGIN_PAC_EVAL) or doctor shield repair check failed"
+fi
+
+# 16j. Gateway self-restart via POST /api/service/restart & CLI service restart (sandbox-isolated, PID handoff)
+RESTART_CSRF_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Origin: https://evil.test' \
+  -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:${CTRL_PORT}/api/service/restart")"
+if [[ "$RESTART_CSRF_CODE" == "403" ]]; then
+  ok "restart_api_csrf_guard" "cross-origin POST /api/service/restart blocked with HTTP 403"
+else
+  fail "restart_api_csrf_guard" "expected 403, got $RESTART_CSRF_CODE"
+fi
+
+OLD_GW_PID="$(python3 -c 'import json,sys,urllib.request; print(json.loads(urllib.request.urlopen(sys.argv[1]).read())["pid"])' "http://127.0.0.1:${CTRL_PORT}/api/health")"
+RESTART_API_JSON="$(curl -fsS -X POST -H "Origin: http://127.0.0.1:${CTRL_PORT}" -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:${CTRL_PORT}/api/service/restart")"
+NEW_GW_PID=""
+for _ in $(seq 1 48); do
+  CAND_PID="$(python3 -c '
+import json,sys,urllib.request
+try:
+    d = json.loads(urllib.request.urlopen(sys.argv[1], timeout=1.0).read())
+    if d.get("ok") and d.get("pid"):
+        print(d["pid"])
+except Exception:
+    pass
+' "http://127.0.0.1:${CTRL_PORT}/api/health" 2>/dev/null || true)"
+  if [[ -n "$CAND_PID" && "$CAND_PID" != "$OLD_GW_PID" ]]; then
+    NEW_GW_PID="$CAND_PID"
+    break
+  fi
+  sleep 0.25
+done
+if [[ -n "$NEW_GW_PID" ]]; then
+  DAEMON_PID="$NEW_GW_PID"
+fi
+OLD_EXITED=0
+for _ in $(seq 1 12); do
+  if ! kill -0 "$OLD_GW_PID" 2>/dev/null; then
+    OLD_EXITED=1
+    break
+  fi
+  sleep 0.2
+done
+if python3 - "$RESTART_API_JSON" "$OLD_GW_PID" "$NEW_GW_PID" "$OLD_EXITED" <<'PY'
+import json, sys
+res = json.loads(sys.argv[1])
+old_pid = int(sys.argv[2])
+new_pid = int(sys.argv[3]) if sys.argv[3] else 0
+old_exited = int(sys.argv[4])
+assert res.get("ok") is True and res.get("restarting") is True, res
+assert res.get("old_pid") == old_pid, res
+assert res.get("managed_by") == "detached", res
+assert new_pid > 0 and new_pid != old_pid, (old_pid, new_pid)
+assert old_exited == 1, f"old daemon pid {old_pid} did not exit cleanly"
+PY
+then
+  ok "api_gateway_self_restart" "POST /api/service/restart handed off cleanly (PID ${OLD_GW_PID} -> ${NEW_GW_PID})"
+else
+  fail "api_gateway_self_restart" "gateway self-restart failed (api=${RESTART_API_JSON}, old=${OLD_GW_PID}, new=${NEW_GW_PID}, exited=${OLD_EXITED})"
+fi
+
+CLI_RESTART_JSON="$("$BIN" service restart --no-launchd --json)"
+CLI_NEW_PID="$(python3 -c 'import json,sys,urllib.request; print(json.loads(urllib.request.urlopen(sys.argv[1], timeout=2.0).read())["pid"])' "http://127.0.0.1:${CTRL_PORT}/api/health" 2>/dev/null || true)"
+if [[ -n "$CLI_NEW_PID" ]]; then
+  DAEMON_PID="$CLI_NEW_PID"
+fi
+if python3 - "$CLI_RESTART_JSON" "$NEW_GW_PID" "$CLI_NEW_PID" <<'PY'
+import json, sys
+res = json.loads(sys.argv[1])
+prev_pid = int(sys.argv[2])
+cur_pid = int(sys.argv[3]) if sys.argv[3] else 0
+assert res.get("ok") is True, res
+assert res.get("managed_by") == "detached", res
+assert res.get("old_pid") == prev_pid, res
+assert res.get("new_pid") == cur_pid and cur_pid != prev_pid, (res, prev_pid, cur_pid)
+PY
+then
+  ok "cli_service_restart" "peaceclaude service restart switched PID cleanly (${NEW_GW_PID} -> ${CLI_NEW_PID})"
+else
+  fail "cli_service_restart" "CLI restart failed: ${CLI_RESTART_JSON} (cur_pid=${CLI_NEW_PID})"
 fi
 
 # 17. Ensure sandbox tests NEVER spawned or touched host Claude.app desktop processes

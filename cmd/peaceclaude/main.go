@@ -564,13 +564,28 @@ func cmdService(args []string) error {
 		fmt.Println("✔ PeaceClaude 安全网关已停止")
 		return nil
 	case "restart":
-		_ = launcher.StopService(cfg)
-		time.Sleep(300 * time.Millisecond)
-		if err := launcher.StartService(cfg, selfBinary(), !*noLaunchd); err != nil {
+		useLaunchd := !*noLaunchd
+		if useLaunchd {
+			stNow := launcher.InspectLaunchAgentStatus(cfg, false, 0)
+			if !cfg.ShouldAutoStartLaunchAgent() && !stNow.LaunchAgentLoaded {
+				useLaunchd = false
+			}
+		}
+		res, err := launcher.RestartService(cfg, selfBinary(), useLaunchd)
+		if err != nil {
 			return err
 		}
-		st := launcher.GetServiceStatus(cfg)
-		fmt.Printf("✔ PeaceClaude 安全网关已重启 (PID=%d, UI=%s)\n", st.PID, st.ControlURL)
+		if *asJSON {
+			printJSON(res)
+			return nil
+		}
+		if res.OldPID > 0 {
+			fmt.Printf("✔ PeaceClaude 安全网关已重启 (PID %d → %d, 托管=%s, LaunchAgent已加载=%t, UI=%s)\n",
+				res.OldPID, res.NewPID, res.ManagedBy, res.Status.LaunchAgentLoaded, res.Status.ControlURL)
+		} else {
+			fmt.Printf("✔ PeaceClaude 安全网关已重启 (PID=%d, 托管=%s, LaunchAgent已加载=%t, UI=%s)\n",
+				res.NewPID, res.ManagedBy, res.Status.LaunchAgentLoaded, res.Status.ControlURL)
+		}
 		return nil
 	case "status":
 		st := launcher.GetServiceStatus(cfg)

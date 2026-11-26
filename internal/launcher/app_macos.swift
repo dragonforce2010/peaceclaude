@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
     private var window: NSWindow!
     private var webView: WKWebView!
     private var controlURL: String = fallbackControlURL
+    private var isRestartingGateway = false
     private var targetURL: URL { URL(string: "\(controlURL)/#accounts")! }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -77,6 +78,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "关于 PeaceClaude", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
+        let restartItem = NSMenuItem(title: "重启安全网关…", action: #selector(restartGateway), keyEquivalent: "r")
+        restartItem.keyEquivalentModifierMask = [.command, .shift]
+        appMenu.addItem(restartItem)
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(withTitle: "隐藏 PeaceClaude", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "退出 PeaceClaude", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
@@ -116,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
     }
 
     @objc private func reloadPage() {
+        if isRestartingGateway { return }
         if webView.url == nil || webView.url?.scheme == "about" {
             ensureDaemonAndLoad()
         } else {
@@ -125,6 +131,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
 
     @objc private func openInBrowser() {
         NSWorkspace.shared.open(targetURL)
+    }
+
+    @objc private func restartGateway() {
+        if isRestartingGateway { return }
+        let alert = NSAlert()
+        alert.messageText = "重启 PeaceClaude 安全网关？"
+        alert.informativeText = "将重启后台静态 IP 代理与控制服务（约 1–3 秒自动恢复），不会关闭已打开的 Claude Desktop 或隔离浏览器。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "确认重启")
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() != .alertFirstButtonReturn {
+            return
+        }
+
+        isRestartingGateway = true
+        showLoadingHTML("正在重启 PeaceClaude 安全网关，等待新进程就绪…")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let oldPID = self.fetchHealthPID()
+            var triggered = false
+            if oldPID != nil {
+                triggered = self.requestGatewayRestartAPI()
+            }
+            if !triggered {
+                triggered = self.runCLIServiceRestart()
+            }
+            Thread.sleep(forTimeInterval: 0.45)
+            var ready = false
+            for _ in 0..<60 {
+                if let newPID = self.fetchHealthPID(), (oldPID == nil || newPID != oldPID) {
+                    ready = true
+                    break
+                }
+                Thread.sleep(forTimeInterval: 0.25)
+            }
+            DispatchQueue.main.async {
+                self.isRestartingGateway = false
+                if ready {
+                    self.webView.load(URLRequest(url: self.targetURL))
+                } else {
+                    self.showLoadingHTML("安全网关重启超时或暂未响应 (\(self.controlURL))，请按 Cmd+R 重试或运行 `peaceclaude service status`。")
+                }
+            }
+        }
     }
 
     private func showLoadingHTML(_ message: String = "正在连接 PeaceClaude 安心工作台与本地守护网关…") {
@@ -164,19 +214,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         }
     }
 
-    private func isDaemonHealthy() -> Bool {
-        guard let url = URL(string: "\(controlURL)/api/health") else { return false }
+    private func fetchHealthPID() -> Int? {
+        guard let url = URL(string: "\(controlURL)/api/health") else { return nil }
         var req = URLRequest(url: url)
         req.timeoutInterval = 1.2
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         let sem = DispatchSemaphore(value: 0)
-        var ok = false
-        URLSession.shared.dataTask(with: req) { _, resp, _ in
-            if let http = resp as? HTTPURLResponse, http.statusCode == 200 {
-                ok = true
+        var pid: Int?
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            if let http = resp as? HTTPURLResponse, http.statusCode == 200,
+               let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               (json["ok"] as? Bool) == true,
+               let rawPID = json["pid"] as? Int, rawPID > 0 {
+                pid = rawPID
             }
             sem.signal()
         }.resume()
         _ = sem.wait(timeout: .now() + 1.5)
+        return pid
+    }
+
+    private func isDaemonHealthy() -> Bool {
+        return fetchHealthPID() != nil
+    }
+
+    private func requestGatewayRestartAPI() -> Bool {
+        guard let url = URL(string: "\(controlURL)/api/service/restart") else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 3.0
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(controlURL, forHTTPHeaderField: "Origin")
+        req.httpBody = "{}".data(using: .utf8)
+        let sem = DispatchSemaphore(value: 0)
+        var ok = false
+        URLSession.shared.dataTask(with: req) { data, resp, _ in
+            if let http = resp as? HTTPURLResponse, http.statusCode == 200,
+               let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               (json["ok"] as? Bool) == true {
+                ok = true
+            }
+            sem.signal()
+        }.resume()
+        _ = sem.wait(timeout: .now() + 3.5)
         return ok
     }
 
@@ -186,6 +268,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
         return FileManager.default.isExecutableFile(atPath: path) ? path : nil
     }
 
+    private func resolveCLIBinary() -> String? {
+        let candidates = [
+            NSHomeDirectory() + "/.local/bin/peaceclaude",
+            "/opt/homebrew/bin/peaceclaude",
+            "/usr/local/bin/peaceclaude"
+        ]
+        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? bundledCLIBinary()
+    }
+
+    private func runCLIServiceRestart() -> Bool {
+        guard let bin = resolveCLIBinary() else { return false }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: bin)
+        proc.arguments = ["service", "restart"]
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            return proc.terminationStatus == 0
+        } catch {
+            return false
+        }
+    }
+
     private func configPath() -> String {
         let envHome = ProcessInfo.processInfo.environment["PEACECLAUDE_HOME"] ?? ""
         let baseDir = envHome.isEmpty ? (NSHomeDirectory() + "/.peaceclaude") : envHome
@@ -193,12 +298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKUI
     }
 
     private func ensureDaemonAutostartViaCLI() {
-        let candidates = [
-            NSHomeDirectory() + "/.local/bin/peaceclaude",
-            "/opt/homebrew/bin/peaceclaude",
-            "/usr/local/bin/peaceclaude"
-        ]
-        guard let bin = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) ?? bundledCLIBinary() else {
+        guard let bin = resolveCLIBinary() else {
             return
         }
         let proc = Process()

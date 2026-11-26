@@ -29,6 +29,7 @@
     'x-circle': '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
     'qr-code': '<rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/><path d="M21 12v.01"/><path d="M12 21v-1"/>',
     terminal: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+    'refresh-cw': '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
   };
 
   function hydrateIcons(root = document) {
@@ -47,6 +48,8 @@
   let currentDetailName = null;
   let pacEnabled = false;
   let pendingConfirm = {};
+  let gatewayRestarting = false;
+  let prevGateOpen = null;
   let editingSide = 'dark';
   let editingSidePinned = false;
   let pairCountdownTimer = null;
@@ -517,6 +520,13 @@
     if (locked) {
       $('lock-overlay-status').textContent = `HTTP :${s.config?.listen?.http_port || 18897} · 静态出口 ${ip} 持续守护`;
     }
+
+    const nowOpen = !!g.open;
+    if (prevGateOpen === false && nowOpen) {
+      if (currentTab === 'accounts') loadAccounts(false);
+      else if (currentTab === 'security') loadDoctor();
+    }
+    prevGateOpen = nowOpen;
   }
 
   function renderPACStatus(pac) {
@@ -1273,7 +1283,8 @@
   }
 
   async function refreshAll() {
-    try { renderStatus(await api('/api/status')); } catch (e) { toast('连接守护进程失败: ' + e.message); }
+    if (gatewayRestarting) return;
+    try { renderStatus(await api('/api/status')); } catch (e) { if (!gatewayRestarting) toast('连接守护进程失败: ' + e.message); }
   }
 
   async function loadAccounts(refresh = false) {
@@ -1453,6 +1464,141 @@
       loadAccounts(false);
     } catch (e) { toast(e.message); }
   });
+
+  const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  function openRestartConfirmModal() {
+    if (gatewayRestarting) return;
+    closeCommandSheet();
+    const svc = statusData?.service || {};
+    let managed = '独立后台进程';
+    if (svc.launch_agent_loaded) {
+      managed = svc.platform === 'linux' ? 'systemd 用户服务' : 'LaunchAgent';
+    }
+    const pid = statusData?.pid || '—';
+    const port = statusData?.config?.listen?.control_port || 18899;
+    $('restart-modal-meta').textContent = `当前 PID ${pid} · 托管方式 ${managed} · 控制端口 :${port}`;
+    $('restart-confirm-modal')?.classList.remove('hidden');
+    $('restart-btn-confirm')?.focus();
+  }
+
+  function closeRestartConfirmModal() {
+    $('restart-confirm-modal')?.classList.add('hidden');
+  }
+
+  async function fetchHealthDirect(timeoutMs = 1500) {
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+    try {
+      const res = await fetch('/api/health', {
+        cache: 'no-store',
+        signal: ctrl ? ctrl.signal : undefined,
+      });
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async function executeGatewayRestart() {
+    if (gatewayRestarting) return;
+    gatewayRestarting = true;
+    closeRestartConfirmModal();
+
+    const topBtn = $('btn-restart-gateway');
+    const popBtn = $('pop-restart-gateway');
+    if (topBtn) {
+      topBtn.disabled = true;
+      topBtn.textContent = '重启中…';
+    }
+    if (popBtn) popBtn.disabled = true;
+    if ($('gate-banner')) $('gate-banner').dataset.state = 'loading';
+    if ($('gate-dot')) $('gate-dot').className = 'status-dot';
+    if ($('gate-pill-text')) $('gate-pill-text').textContent = '网关重启中…';
+    if ($('sb-status-dot')) $('sb-status-dot').className = 'status-dot';
+    if ($('sb-gateway-status')) $('sb-gateway-status').textContent = '正在重启网关…';
+    toast('正在重启安全网关，等待新进程就绪…', 'warn');
+
+    let oldPid = Number(statusData?.pid || 0);
+    try {
+      const res = await api('/api/service/restart', { method: 'POST', body: '{}' });
+      if (res && res.old_pid) oldPid = Number(res.old_pid);
+
+      await sleepMs(450);
+      const deadline = Date.now() + 18000;
+      let newHealth = null;
+      let lastSeenPid = 0;
+      while (Date.now() < deadline) {
+        const h = await fetchHealthDirect(1500);
+        if (h && h.ok && h.pid) {
+          lastSeenPid = Number(h.pid);
+          if (oldPid === 0 || lastSeenPid !== oldPid) {
+            newHealth = h;
+            break;
+          }
+        }
+        await sleepMs(300);
+      }
+
+      if (!newHealth) {
+        gatewayRestarting = false;
+        await refreshAll();
+        if (lastSeenPid && lastSeenPid === oldPid) {
+          toast(`安全网关重启超时：进程仍停留在原 PID ${oldPid}，请检查日志`, 'err');
+        } else {
+          toast('安全网关重启后暂未响应，请执行 peaceclaude service status 检查', 'err');
+        }
+        return;
+      }
+
+      // Wait briefly (up to 4s) for the newly started daemon's initial egress probe to settle so UI jumps straight to steady state.
+      const probeDeadline = Date.now() + 4000;
+      while (Date.now() < probeDeadline) {
+        try {
+          const st = await api('/api/status');
+          if (st?.gate?.open || st?.gate?.last_probe?.checked_at) {
+            break;
+          }
+        } catch {}
+        await sleepMs(250);
+      }
+
+      gatewayRestarting = false;
+      prevGateOpen = null;
+      await Promise.allSettled([
+        refreshAll(),
+        loadAccounts(false),
+        currentTab === 'security' ? loadDoctor() : Promise.resolve(),
+        currentTab === 'leaks' ? loadLeaks() : Promise.resolve(),
+        currentTab === 'capture' ? loadCaptures() : Promise.resolve(),
+        currentTab === 'remote' ? loadRemote() : Promise.resolve(),
+        currentTab === 'network' ? loadNativeBrowsers() : Promise.resolve(),
+      ]);
+      toast(`安全网关已重启就绪（PID ${oldPid || '—'} → ${newHealth.pid}）`, 'ok');
+    } catch (e) {
+      gatewayRestarting = false;
+      toast('触发网关重启失败: ' + (e?.message || '未知错误'), 'err');
+      refreshAll();
+    } finally {
+      if (topBtn) {
+        topBtn.disabled = false;
+        topBtn.textContent = '重启网关';
+      }
+      if (popBtn) popBtn.disabled = false;
+    }
+  }
+
+  $('btn-restart-gateway')?.addEventListener('click', openRestartConfirmModal);
+  $('pop-restart-gateway')?.addEventListener('click', openRestartConfirmModal);
+  $('restart-modal-close')?.addEventListener('click', closeRestartConfirmModal);
+  $('restart-btn-cancel')?.addEventListener('click', closeRestartConfirmModal);
+  $('restart-confirm-modal')?.addEventListener('click', (ev) => {
+    if (ev.target === $('restart-confirm-modal')) closeRestartConfirmModal();
+  });
+  $('restart-btn-confirm')?.addEventListener('click', executeGatewayRestart);
 
   // Top Telemetry Rail Actions
   $('btn-recheck').addEventListener('click', () => withBtnBusy($('btn-recheck'), '探测中…', async () => {
@@ -1664,6 +1810,8 @@
       closeCommandSheet();
       $('account-detail-modal').classList.add('hidden');
       $('account-create-modal').classList.add('hidden');
+      $('identity-modal')?.classList.add('hidden');
+      closeRestartConfirmModal();
       return;
     }
     if (!typing && (ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === 'l') {

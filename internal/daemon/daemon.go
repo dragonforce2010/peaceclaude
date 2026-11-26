@@ -66,6 +66,8 @@ type Server struct {
 
 	remoteMgr        *remote.Manager
 	uiLocked         atomic.Bool
+	restarting       atomic.Bool
+	restartHook      func(ctx context.Context, managedBy string)
 	mobileMu         sync.Mutex
 	mobileLn         net.Listener
 	mobileSrv        *http.Server
@@ -324,9 +326,20 @@ func (s *Server) Shutdown(ctx context.Context) {
 		}
 		s.stopMobileListener(ctx)
 		s.releaseAutoPeaceLock()
-		_ = os.Remove(config.DaemonPIDPath())
+		removeOwnPIDFile(config.DaemonPIDPath(), os.Getpid())
 		close(s.doneCh)
 	})
+}
+
+func removeOwnPIDFile(pidPath string, selfPID int) {
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid == selfPID {
+		_ = os.Remove(pidPath)
+	}
 }
 
 func (s *Server) probeLoop(ctx context.Context) {

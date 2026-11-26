@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +29,7 @@ func (s *Server) controlHandler() http.Handler {
 	mux.HandleFunc("/api/health", s.handleHealth)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/service/autostart", s.withCSRF(s.handleServiceAutostart))
+	mux.HandleFunc("/api/service/restart", s.withCSRF(s.handleServiceRestart))
 	mux.HandleFunc("/api/check", s.withCSRF(s.handleCheck))
 	mux.HandleFunc("/api/lock", s.withCSRF(s.handleLock))
 	mux.HandleFunc("/api/leaks", s.handleLeaks)
@@ -1451,6 +1454,74 @@ func (s *Server) handleServiceAutostart(w http.ResponseWriter, r *http.Request) 
 		"message": msg,
 		"service": launcher.InspectLaunchAgentStatus(&next, true, os.Getpid()),
 	})
+}
+
+func (s *Server) handleServiceRestart(w http.ResponseWriter, _ *http.Request) {
+	cfg := s.configSnapshot()
+	s.mu.RLock()
+	selfBin := s.selfBin
+	s.mu.RUnlock()
+
+	st := launcher.InspectLaunchAgentStatus(&cfg, true, os.Getpid())
+	managedBy := "detached"
+	if launcher.CanManageHostLaunchAgent() {
+		if runtime.GOOS == "darwin" && st.LaunchAgentLoaded && st.LaunchAgentValid {
+			managedBy = "launchd"
+		} else if runtime.GOOS == "linux" && st.LaunchAgentLoaded {
+			managedBy = "systemd"
+		}
+	}
+
+	if !s.restarting.CompareAndSwap(false, true) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":                 true,
+			"restarting":         true,
+			"already_restarting": true,
+			"old_pid":            os.Getpid(),
+			"managed_by":         managedBy,
+		})
+		return
+	}
+
+	if s.restartHook == nil && os.Getenv("PEACECLAUDE_DISABLE_SELF_RESTART") != "1" && managedBy == "detached" && strings.TrimSpace(selfBin) == "" {
+		s.restarting.Store(false)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unable to locate peaceclaude binary for restart"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"restarting": true,
+		"old_pid":    os.Getpid(),
+		"managed_by": managedBy,
+	})
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		if s.restartHook != nil {
+			s.restartHook(context.Background(), managedBy)
+			return
+		}
+		if os.Getenv("PEACECLAUDE_DISABLE_SELF_RESTART") == "1" {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			s.Shutdown(ctx)
+			return
+		}
+		if err := launcher.TriggerSelfRestart(&cfg, selfBin, managedBy); err != nil {
+			log.Printf("[daemon] TriggerSelfRestart(%s) failed: %v", managedBy, err)
+			if managedBy == "launchd" {
+				ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+				defer cancel()
+				s.Shutdown(ctx)
+				return
+			}
+			s.restarting.Store(false)
+		}
+	}()
 }
 
 func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
